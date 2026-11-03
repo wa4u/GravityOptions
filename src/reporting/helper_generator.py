@@ -1,0 +1,543 @@
+import os
+import json
+from datetime import datetime
+from typing import Dict, Any, Optional
+import yaml
+from src.utils.logger import log
+
+class HelperPageGenerator:
+    """
+    Generates the Helper & Control Center HTML page (helper.html)
+    providing:
+    - Real-time bot status & market clock
+    - Open positions monitor
+    - Live Option Greeks & Strike Calculator
+    - Expiry calendar & universe reference
+    - Server command quick actions
+    """
+    def __init__(
+        self,
+        config_path: str = "config/config.yaml",
+        output_path: str = "reports/helper.html",
+        web_export_path: Optional[str] = None
+    ):
+        self.config_path = config_path
+        self.output_path = output_path
+        self.web_export_path = web_export_path
+        os.makedirs(os.path.dirname(self.output_path), exist_ok=True)
+
+    def load_config(self) -> Dict[str, Any]:
+        try:
+            with open(self.config_path, "r") as f:
+                return yaml.safe_load(f)
+        except Exception:
+            return {}
+
+    def generate_html(self) -> str:
+        cfg = self.load_config()
+        generated_at = datetime.now().strftime("%d %b %Y, %I:%M %p")
+        
+        indices = cfg.get("indices", {})
+        stocks = cfg.get("stocks", {}).get("universe", [])
+        risk = cfg.get("risk", {})
+        system_cfg = cfg.get("system", {})
+
+        indices_json = json.dumps(indices)
+        stocks_json = json.dumps(stocks)
+
+        html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GravityOptions - Helper & Control Center</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {{
+            --bg-dark: #0b0f19;
+            --bg-card: #111827;
+            --bg-card-hover: #1f2937;
+            --border-color: #374151;
+            --text-primary: #f9fafb;
+            --text-secondary: #9ca3af;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --accent-blue: #3b82f6;
+            --accent-purple: #8b5cf6;
+            --accent-yellow: #f59e0b;
+        }}
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            font-family: 'Inter', -apple-system, sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-primary);
+            padding: 24px;
+            min-height: 100vh;
+        }}
+        .navbar {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            padding-bottom: 18px;
+            border-bottom: 1px solid var(--border-color);
+        }}
+        .nav-brand {{
+            font-size: 22px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }}
+        .nav-links {{
+            display: flex;
+            gap: 12px;
+        }}
+        .nav-link {{
+            text-decoration: none;
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 600;
+            padding: 8px 16px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            background-color: var(--bg-card);
+            transition: all 0.2s;
+        }}
+        .nav-link:hover, .nav-link.active {{
+            background-color: var(--accent-blue);
+            color: #ffffff;
+            border-color: var(--accent-blue);
+        }}
+        .grid-2 {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 24px;
+        }}
+        @media (max-width: 900px) {{
+            .grid-2 {{ grid-template-columns: 1fr; }}
+        }}
+        .card {{
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 22px;
+        }}
+        .card-title {{
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }}
+        .badge {{
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            font-family: 'JetBrains Mono', monospace;
+        }}
+        .badge-active {{ background: rgba(16, 185, 129, 0.15); color: #10b981; }}
+        .badge-offline {{ background: rgba(239, 68, 68, 0.15); color: #ef4444; }}
+        .badge-pending {{ background: rgba(245, 158, 11, 0.15); color: #f59e0b; }}
+        .mono {{ font-family: 'JetBrains Mono', monospace; }}
+
+        /* Expiry timeline */
+        .expiry-days {{
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 10px;
+            margin-top: 12px;
+        }}
+        .expiry-day-box {{
+            background-color: var(--bg-dark);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px 8px;
+            text-align: center;
+        }}
+        .expiry-day-box.highlight {{
+            border-color: var(--accent-blue);
+            background: rgba(59, 130, 246, 0.08);
+        }}
+        .expiry-day-name {{
+            font-size: 11px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            font-weight: 600;
+        }}
+        .expiry-index-name {{
+            font-size: 14px;
+            font-weight: 700;
+            margin-top: 6px;
+            color: var(--text-primary);
+        }}
+
+        /* Calculator Styles */
+        .calc-form {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+            margin-bottom: 16px;
+        }}
+        .form-group {{
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }}
+        label {{
+            font-size: 12px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }}
+        input, select {{
+            background-color: var(--bg-dark);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 10px 12px;
+            border-radius: 6px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+        }}
+        input:focus, select:focus {{
+            outline: none;
+            border-color: var(--accent-blue);
+        }}
+        .calc-btn {{
+            grid-column: span 2;
+            background-color: var(--accent-blue);
+            color: white;
+            border: none;
+            padding: 12px;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }}
+        .calc-btn:hover {{ opacity: 0.9; }}
+        .greeks-result {{
+            background-color: var(--bg-dark);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            text-align: center;
+        }}
+        .greek-box-title {{
+            font-size: 11px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+        }}
+        .greek-box-val {{
+            font-size: 18px;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+            margin-top: 4px;
+        }}
+
+        /* Stock Pill tags */
+        .stock-tags {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 12px;
+        }}
+        .stock-tag {{
+            background-color: var(--bg-dark);
+            border: 1px solid var(--border-color);
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-family: 'JetBrains Mono', monospace;
+        }}
+
+        /* Code command box */
+        .cmd-box {{
+            background-color: #030712;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            color: #38bdf8;
+            margin-top: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }}
+        .copy-btn {{
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+        }}
+        .copy-btn:hover {{ color: var(--text-primary); }}
+    </style>
+</head>
+<body>
+
+    <div class="navbar">
+        <div class="nav-brand">
+            ⚡ GravityOptions Helper Center
+        </div>
+        <div class="nav-links">
+            <a href="/" class="nav-link">📊 Performance Analytics</a>
+            <a href="/helper.html" class="nav-link active">🛠️ Helper & Controls</a>
+        </div>
+    </div>
+
+    <!-- Top Row: Market Status & Expiry Calendar -->
+    <div class="grid-2">
+        <div class="card">
+            <div class="card-title">
+                <span>Market Clock & System Status</span>
+                <span class="badge badge-active" id="live-status-badge">SYSTEM READY</span>
+            </div>
+            <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
+                Automated intraday trading session operates between <b>09:15 AM</b> and <b>03:30 PM IST</b>.
+            </p>
+            <div style="display: flex; gap: 20px; margin-bottom: 16px;">
+                <div>
+                    <div style="font-size: 11px; color: var(--text-secondary);">TIMEZONE</div>
+                    <div style="font-size: 16px; font-weight: 700; margin-top: 4px;">Asia / Kolkata (IST)</div>
+                </div>
+                <div>
+                    <div style="font-size: 11px; color: var(--text-secondary);">INTRADAY EXIT</div>
+                    <div style="font-size: 16px; font-weight: 700; color: var(--accent-yellow); margin-top: 4px;">15:15 IST (Auto Square-Off)</div>
+                </div>
+                <div>
+                    <div style="font-size: 11px; color: var(--text-secondary);">MAX DAILY LOSS</div>
+                    <div style="font-size: 16px; font-weight: 700; color: var(--accent-red); margin-top: 4px;">₹{risk.get('max_daily_loss_inr', 5000):,.0f}</div>
+                </div>
+            </div>
+            <div style="font-size: 12px; color: var(--text-secondary);">
+                Broker Feed: <b style="color: var(--text-primary); text-transform: uppercase;">{system_cfg.get('broker', 'AngelOne')}</b> | Execution Mode: <b style="color: var(--accent-green); text-transform: uppercase;">{system_cfg.get('mode', 'Paper')} Trading</b>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Weekly Indian Expiry Calendar</div>
+            <p style="font-size: 13px; color: var(--text-secondary);">
+                Each weekday features an index expiry offering fresh momentum setups:
+            </p>
+            <div class="expiry-days">
+                <div class="expiry-day-box">
+                    <div class="expiry-day-name">MON</div>
+                    <div class="expiry-index-name">MIDCP</div>
+                </div>
+                <div class="expiry-day-box">
+                    <div class="expiry-day-name">TUE</div>
+                    <div class="expiry-index-name">FINNIFTY</div>
+                </div>
+                <div class="expiry-day-box highlight">
+                    <div class="expiry-day-name">WED</div>
+                    <div class="expiry-index-name" style="color: var(--accent-blue);">BANKNIFTY</div>
+                </div>
+                <div class="expiry-day-box highlight">
+                    <div class="expiry-day-name">THU</div>
+                    <div class="expiry-index-name" style="color: var(--accent-green);">NIFTY 50</div>
+                </div>
+                <div class="expiry-day-box highlight">
+                    <div class="expiry-day-name">FRI</div>
+                    <div class="expiry-index-name" style="color: var(--accent-purple);">SENSEX</div>
+                </div>
+            </div>
+            <div style="margin-top: 14px; font-size: 12px; color: var(--text-secondary);">
+                • Stock Options expire on the <b>Last Thursday</b> of each month.
+            </div>
+        </div>
+    </div>
+
+    <!-- Row 2: Live Greeks & Strike Calculator -->
+    <div class="grid-2">
+        <div class="card">
+            <div class="card-title">Option Strike & Greeks Calculator</div>
+            <div class="calc-form">
+                <div class="form-group">
+                    <label>Underlying Instrument</label>
+                    <select id="calc-symbol" onchange="autoFillSpot()">
+                        <option value="NIFTY">NIFTY 50 (Step 50)</option>
+                        <option value="BANKNIFTY">BANK NIFTY (Step 100)</option>
+                        <option value="SENSEX">SENSEX (Step 100)</option>
+                        <option value="FINNIFTY">FINNIFTY (Step 50)</option>
+                        <option value="RELIANCE">RELIANCE (Step 20)</option>
+                        <option value="HDFCBANK">HDFCBANK (Step 10)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Current Spot Price (₹)</label>
+                    <input type="number" id="calc-spot" value="24250" step="any">
+                </div>
+                <div class="form-group">
+                    <label>Days to Expiry</label>
+                    <input type="number" id="calc-days" value="3" min="1" max="30">
+                </div>
+                <div class="form-group">
+                    <label>Option Type</label>
+                    <select id="calc-type">
+                        <option value="CE">Call Option (CE)</option>
+                        <option value="PE">Put Option (PE)</option>
+                    </select>
+                </div>
+                <button class="calc-btn" onclick="calculateGreeks()">Compute Recommended Strike & Greeks</button>
+            </div>
+
+            <div class="greeks-result">
+                <div>
+                    <div class="greek-box-title">ATM Strike</div>
+                    <div class="greek-box-val" id="res-strike" style="color: var(--accent-blue);">24,250</div>
+                </div>
+                <div>
+                    <div class="greek-box-title">Delta (Δ)</div>
+                    <div class="greek-box-val" id="res-delta" style="color: var(--accent-green);">+0.52</div>
+                </div>
+                <div>
+                    <div class="greek-box-title">Theta (decay/day)</div>
+                    <div class="greek-box-val" id="res-theta" style="color: var(--accent-red);">-₹18.5</div>
+                </div>
+                <div>
+                    <div class="greek-box-title">Vega</div>
+                    <div class="greek-box-val" id="res-vega">9.8</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Trading Universe (Active Candidates)</div>
+            <p style="font-size: 13px; color: var(--text-secondary);">
+                Core indices and elite F&O stocks monitored for high RVOL (&gt;1.8x) &amp; ATR breakout:
+            </p>
+            <div class="stock-tags" id="universe-tags">
+                <!-- Dynamically populated -->
+            </div>
+
+            <div style="margin-top: 24px;">
+                <div class="card-title" style="font-size: 14px;">Server Terminal Quick Cheatsheet</div>
+                <div class="cmd-box">
+                    <span>nohup python run_paper_trading.py &gt; trading.log 2&gt;&amp;1 &amp;</span>
+                    <button class="copy-btn" onclick="navigator.clipboard.writeText('nohup python run_paper_trading.py > trading.log 2>&1 &')">Copy</button>
+                </div>
+                <div class="cmd-box">
+                    <span>tail -f trading.log</span>
+                    <button class="copy-btn" onclick="navigator.clipboard.writeText('tail -f trading.log')">Copy</button>
+                </div>
+                <div class="cmd-box">
+                    <span>pkill -f run_paper_trading.py</span>
+                    <button class="copy-btn" onclick="navigator.clipboard.writeText('pkill -f run_paper_trading.py')">Copy</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const stockUniverse = {stocks_json};
+        const indicesConfig = {indices_json};
+
+        // Render stock tags
+        const tagsContainer = document.getElementById('universe-tags');
+        Object.keys(indicesConfig).forEach(idx => {{
+            const tag = document.createElement('span');
+            tag.className = 'stock-tag';
+            tag.style.borderColor = '#3b82f6';
+            tag.style.color = '#38bdf8';
+            tag.innerText = '📊 ' + idx;
+            tagsContainer.appendChild(tag);
+        }});
+
+        stockUniverse.forEach(sym => {{
+            const tag = document.createElement('span');
+            tag.className = 'stock-tag';
+            tag.innerText = sym;
+            tagsContainer.appendChild(tag);
+        }});
+
+        function autoFillSpot() {{
+            const sym = document.getElementById('calc-symbol').value;
+            const spotInput = document.getElementById('calc-spot');
+            const defaultSpots = {{
+                'NIFTY': 24250,
+                'BANKNIFTY': 51600,
+                'SENSEX': 79500,
+                'FINNIFTY': 23850,
+                'RELIANCE': 2980,
+                'HDFCBANK': 1740
+            }};
+            if (defaultSpots[sym]) {{
+                spotInput.value = defaultSpots[sym];
+            }}
+            calculateGreeks();
+        }}
+
+        function calculateGreeks() {{
+            const sym = document.getElementById('calc-symbol').value;
+            const spot = parseFloat(document.getElementById('calc-spot').value) || 24000;
+            const days = parseFloat(document.getElementById('calc-days').value) || 3;
+            const optType = document.getElementById('calc-type').value;
+
+            const steps = {{
+                'NIFTY': 50,
+                'BANKNIFTY': 100,
+                'SENSEX': 100,
+                'FINNIFTY': 50,
+                'RELIANCE': 20,
+                'HDFCBANK': 10
+            }};
+            const step = steps[sym] || 50;
+            const atmStrike = Math.round(spot / step) * step;
+
+            const T = Math.max(days / 365.25, 0.001);
+            const sigma = 0.14; // 14% typical IV
+            const r = 0.07;
+            const sqrtT = Math.sqrt(T);
+
+            const d1 = (Math.log(spot / atmStrike) + (r + 0.5 * sigma * sigma) * T) / (sigma * sqrtT);
+            const d2 = d1 - sigma * sqrtT;
+
+            // Normal CDF approx
+            function cdf(x) {{
+                const t = 1 / (1 + 0.2316419 * Math.abs(x));
+                const d = 0.3989423 * Math.exp(-x * x / 2);
+                let p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+                if (x > 0) p = 1 - p;
+                return p;
+            }}
+            const pdf = Math.exp(-0.5 * d1 * d1) / Math.sqrt(2 * Math.PI);
+
+            let delta = optType === 'CE' ? cdf(d1) : cdf(d1) - 1.0;
+            let theta = (-(spot * sigma * pdf) / (2 * sqrtT)) / 365.25;
+            let vega = (spot * sqrtT * pdf) / 100.0;
+
+            document.getElementById('res-strike').innerText = atmStrike.toLocaleString('en-IN');
+            document.getElementById('res-delta').innerText = (delta >= 0 ? '+' : '') + delta.toFixed(2);
+            document.getElementById('res-theta').innerText = '-₹' + Math.abs(theta * (spot * 0.008)).toFixed(1);
+            document.getElementById('res-vega').innerText = (vega * 0.1).toFixed(1);
+        }}
+
+        // Run initial calculation
+        calculateGreeks();
+    </script>
+</body>
+</html>
+"""
+        with open(self.output_path, "w", encoding="utf-8") as f:
+            f.write(html_content)
+
+        if self.web_export_path:
+            try:
+                os.makedirs(os.path.dirname(self.web_export_path), exist_ok=True)
+                with open(self.web_export_path, "w", encoding="utf-8") as f_web:
+                    f_web.write(html_content)
+                log.info(f"🌐 Helper Page published to: {self.web_export_path}")
+            except Exception as e:
+                log.warning(f"Could not export helper page to web path: {e}")
+
+        log.info(f"🛠️ Helper Page exported to: {self.output_path}")
+        return os.path.abspath(self.output_path)

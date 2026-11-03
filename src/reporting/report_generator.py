@@ -213,13 +213,17 @@ class ReportGenerator:
             <h1>⚡ GravityOptions Analytics</h1>
             <div class="subtitle">Options Buying Automation • Report generated on {generated_at}</div>
         </div>
-        <div class="tabs">
-            <button class="tab-btn" onclick="filterPeriod('daily')">Daily (Today)</button>
-            <button class="tab-btn" onclick="filterPeriod('weekly')">Weekly</button>
-            <button class="tab-btn" onclick="filterPeriod('monthly')">Monthly</button>
-            <button class="tab-btn active" onclick="filterPeriod('all')">All-Time</button>
+        <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+            <a href="/helper.html" style="text-decoration: none; color: #f9fafb; font-size: 13px; font-weight: 600; padding: 8px 16px; border-radius: 6px; border: 1px solid #374151; background-color: #111827; transition: background 0.2s;">🛠️ Helper & Controls</a>
+            <div class="tabs">
+                <button class="tab-btn" onclick="filterPeriod('daily')">Daily (Today)</button>
+                <button class="tab-btn" onclick="filterPeriod('weekly')">Weekly</button>
+                <button class="tab-btn" onclick="filterPeriod('monthly')">Monthly</button>
+                <button class="tab-btn active" onclick="filterPeriod('all')">All-Time</button>
+            </div>
         </div>
     </div>
+
 
     <!-- KPI Grid -->
     <div class="kpi-grid">

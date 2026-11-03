@@ -11,11 +11,12 @@ import os
 import webbrowser
 import yaml
 from src.reporting.report_generator import ReportGenerator
+from src.reporting.helper_generator import HelperPageGenerator
 from src.utils.logger import log
 
 def main():
     print("=" * 60)
-    print("   GRAVITY OPTIONS - PERFORMANCE ANALYTICS REPORT GENERATOR")
+    print("   GRAVITY OPTIONS - WEB PAGES GENERATOR")
     print("=" * 60)
 
     web_path = None
@@ -26,14 +27,27 @@ def main():
     except Exception:
         pass
 
+    # 1. Generate Performance Dashboard
     generator = ReportGenerator(web_export_path=web_path)
     abs_path = generator.generate_html_report()
-
     
+    # 2. Generate Helper & Control Page
+    web_helper_path = None
+    if web_path and "index.html" in web_path:
+        web_helper_path = web_path.replace("index.html", "helper.html")
+
+    helper_gen = HelperPageGenerator(web_export_path=web_helper_path)
+    helper_path = helper_gen.generate_html()
+
     file_url = f"file:///{abs_path.replace(os.sep, '/')}"
-    print(f"\n✅ Report generated successfully!")
-    print(f"📁 Local File: {abs_path}")
-    print(f"🌐 Browser URL: {file_url}\n")
+    print(f"\n✅ All pages generated successfully!")
+    print(f"📊 Dashboard: {abs_path}")
+    print(f"🛠️ Helper Page: {helper_path}")
+    if web_path:
+        print(f"🌐 Live Web URLs:")
+        print(f"   • Dashboard:   https://gravity.work.gd/")
+        print(f"   • Helper Page: https://gravity.work.gd/helper.html\n")
+
 
     # If --open passed or user wants to preview
     if "--open" in sys.argv:
