@@ -18,3 +18,7 @@ venv/
 
 # Logs
 *.log
+
+# Generated HTML reports (local)
+reports/*.html
+
