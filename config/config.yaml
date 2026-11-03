@@ -1,0 +1,120 @@
+# ==============================================================================
+# GravityOptions - Automated Options Buying System Configuration
+# ==============================================================================
+
+system:
+  mode: "paper"              # "paper" or "live"
+  broker: "angelone"         # "angelone", "upstox", or "mock"
+  timezone: "Asia/Kolkata"
+  trading_start_time: "09:15"
+  intraday_exit_time: "15:15"
+  market_close_time: "15:30"
+  stagnation_timeout_mins: 20 # Exit option if no favorable move in 20 mins (anti-theta)
+
+# Broker API Credentials (Keep secure)
+credentials:
+  angelone:
+    client_id: "YOUR_ANGEL_CLIENT_ID"
+    pin_or_password: "YOUR_PASSWORD_OR_PIN"
+    api_key: "YOUR_SMARTAPI_API_KEY"
+    totp_secret: "YOUR_TOTP_KEY_FOR_AUTO_LOGIN"  # Generated when setting up TOTP
+
+# Indices Configuration (Toggle on/off as desired)
+indices:
+  NIFTY:
+    enabled: true
+    exchange: "NSE"
+    spot_symbol: "Nifty 50"
+    lot_size: 25
+    strike_step: 50
+    fixed_lots: 1
+    max_lots: 5
+    atm_offset: 0            # 0 = ATM, -1 = 1 strike ITM for Call / OTM for Put
+    prefer_itm_delta: 0.55   # Target delta between 0.50 and 0.65
+
+  BANKNIFTY:
+    enabled: true
+    exchange: "NSE"
+    spot_symbol: "Nifty Bank"
+    lot_size: 15
+    strike_step: 100
+    fixed_lots: 1
+    max_lots: 4
+    atm_offset: 0
+    prefer_itm_delta: 0.55
+
+  SENSEX:
+    enabled: true
+    exchange: "BSE"
+    spot_symbol: "SENSEX"
+    lot_size: 10
+    strike_step: 100
+    fixed_lots: 1
+    max_lots: 4
+    atm_offset: 0
+    prefer_itm_delta: 0.55
+
+  FINNIFTY:
+    enabled: false           # Toggle true whenever you want to trade FinNifty
+    exchange: "NSE"
+    spot_symbol: "Nifty Fin Service"
+    lot_size: 25
+    strike_step: 50
+    fixed_lots: 1
+    max_lots: 4
+    atm_offset: 0
+    prefer_itm_delta: 0.55
+
+# Stock Options Screener & Universe Configuration
+stocks:
+  enabled: true
+  # Top liquid F&O candidates for high momentum
+  universe:
+    - "RELIANCE"
+    - "HDFCBANK"
+    - "ICICIBANK"
+    - "INFY"
+    - "SBIN"
+    - "TATAMOTORS"
+    - "TCS"
+    - "LT"
+    - "BHARTIARTL"
+    - "AXISBANK"
+    - "MARUTI"
+    - "KOTAKBANK"
+    - "BAJFINANCE"
+    - "M&M"
+    - "SUNPHARMA"
+
+  fixed_lots: 1
+  min_rvol: 1.8              # Relative volume multiplier required to qualify
+  min_atr_pct: 1.2           # Minimum daily ATR percentage for momentum
+  carry_forward:
+    enabled: true            # Allow overnight hold if criteria pass
+    min_profit_pct: 15.0     # Must be in >= 15% profit to carry overnight
+    min_days_to_expiry: 7    # Avoid carry forward in expiry week (physical delivery risk)
+
+# Position Sizing & Money Management
+position_sizing:
+  mode: "fixed_lots"         # Options: "fixed_lots" or "risk_percentage"
+  risk_per_trade_pct: 1.5    # Percentage of virtual/live capital at risk per trade
+  virtual_capital: 100000.0  # Initial paper trading account balance (INR)
+
+# Risk Management & Circuit Breakers
+risk:
+  max_daily_loss_inr: 5000.0 # Hard daily loss cutoff across all trades
+  max_open_trades: 3         # Max concurrent active trades
+  stop_loss_pct: 15.0        # Default stop-loss on option premium (e.g., 15%)
+  target_profit_pct: 35.0    # First target profit on option premium (e.g., 35%)
+  trail_sl_trigger_pct: 15.0 # Move SL to breakeven once profit reaches 15%
+  trail_step_pct: 10.0       # Subsequent trailing step
+
+# Paper Trading Cost Simulation (Indian Taxes & Charges)
+paper_simulation:
+  brokerage_per_order_inr: 20.0 # Flat 20/order
+  stt_pct_on_sell: 0.10         # 0.1% on option sell turnover (revised rate)
+  exchange_turnover_pct: 0.05   # NSE turnover charges
+  gst_pct: 18.0                 # 18% GST on brokerage + exchange
+  sebi_charges_per_crore: 10.0
+  stamp_duty_pct_on_buy: 0.003  # 0.003% on buy
+  slippage_points: 0.5          # Average simulated fill slippage

@@ -1,0 +1,25 @@
+# ==============================================================================
+# Telegram Alerts Configuration
+# ==============================================================================
+
+telegram:
+  enabled: true
+  bot_token: "YOUR_TELEGRAM_BOT_TOKEN"      # From @BotFather
+  chat_id: "YOUR_TELEGRAM_CHAT_ID"          # Your user ID or group channel ID
+
+  # Granular alert toggles - turn ON (true) or OFF (false) per your preference
+  notifications:
+    signal_detected: true      # Alert when strategy detects a buy setup
+    order_entry: true          # Alert on buy entry with strike, price, lot, SL, TP
+    trailing_sl_updated: true  # Alert when SL moves to breakeven or trails higher
+    order_exit: true           # Alert on exit (SL, TP, Time Stop, EOD) with P&L card
+    risk_circuit_breaker: true # Critical alert when daily drawdown limit is hit
+    stock_carry_decision: true # Alert at 15:10 IST whether a stock is carried or exited
+    daily_summary: true        # End-of-Day detailed PnL and trade statistics summary
+    system_heartbeat: false    # Periodic hourly heartbeat to confirm bot is alive
+
+  # Visual styling
+  format:
+    include_emojis: true
+    show_charges_breakdown: true
+    show_risk_reward_ratio: true

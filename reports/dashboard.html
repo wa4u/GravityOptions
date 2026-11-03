@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GravityOptions - Performance Analytics Dashboard</title>
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0b0f19;
+            --bg-card: #111827;
+            --bg-card-hover: #1f2937;
+            --border-color: #374151;
+            --text-primary: #f9fafb;
+            --text-secondary: #9ca3af;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --accent-blue: #3b82f6;
+            --accent-purple: #8b5cf6;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-primary);
+            padding: 24px;
+            min-height: 100vh;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .header h1 {
+            font-size: 24px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .header .subtitle {
+            color: var(--text-secondary);
+            font-size: 13px;
+            margin-top: 4px;
+        }
+        /* Period filter tabs */
+        .tabs {
+            display: flex;
+            gap: 8px;
+            background-color: var(--bg-card);
+            padding: 4px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+        .tab-btn {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            padding: 8px 18px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+        .tab-btn:hover { color: var(--text-primary); }
+        .tab-btn.active {
+            background-color: var(--accent-blue);
+            color: #ffffff;
+        }
+        /* KPI Cards Grid */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .kpi-card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 18px;
+        }
+        .kpi-title {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+        .kpi-value {
+            font-size: 22px;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .kpi-subtext {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+        .positive { color: var(--accent-green); }
+        .negative { color: var(--accent-red); }
+        /* Charts Grid */
+        .charts-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+        @media (max-width: 1024px) {
+            .charts-grid { grid-template-columns: 1fr; }
+        }
+        .chart-card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 20px;
+        }
+        .chart-header {
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        /* Table Styles */
+        .table-container {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 20px;
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            text-align: left;
+        }
+        th {
+            color: var(--text-secondary);
+            font-weight: 600;
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--border-color);
+            white-space: nowrap;
+        }
+        td {
+            padding: 12px 14px;
+            border-bottom: 1px solid #1f2937;
+            white-space: nowrap;
+            font-family: 'Inter', sans-serif;
+        }
+        tr:hover td {
+            background-color: var(--bg-card-hover);
+        }
+        .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .badge-ce { background: rgba(16, 185, 129, 0.15); color: #10b981; }
+        .badge-pe { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+        .badge-win { background: rgba(16, 185, 129, 0.15); color: #10b981; }
+        .badge-loss { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <div>
+            <h1>⚡ GravityOptions Analytics</h1>
+            <div class="subtitle">Options Buying Automation • Report generated on 03 Nov 2026, 03:31 PM</div>
+        </div>
+        <div class="tabs">
+            <button class="tab-btn" onclick="filterPeriod('daily')">Daily (Today)</button>
+            <button class="tab-btn" onclick="filterPeriod('weekly')">Weekly</button>
+            <button class="tab-btn" onclick="filterPeriod('monthly')">Monthly</button>
+            <button class="tab-btn active" onclick="filterPeriod('all')">All-Time</button>
+        </div>
+    </div>
+
+    <!-- KPI Grid -->
+    <div class="kpi-grid">
+        <div class="kpi-card">
+            <div class="kpi-title">Net Realized P&L</div>
+            <div class="kpi-value" id="kpi-net-pnl">₹0.00</div>
+            <div class="kpi-subtext" id="kpi-roi">0.0% Return</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-title">Win Rate</div>
+            <div class="kpi-value" id="kpi-win-rate">0.0%</div>
+            <div class="kpi-subtext" id="kpi-trades-count">0 Trades (0W / 0L)</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-title">Profit Factor</div>
+            <div class="kpi-value" id="kpi-profit-factor">0.00</div>
+            <div class="kpi-subtext" id="kpi-gross-ratio">Gross Win / Gross Loss</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-title">Total Taxes & Charges</div>
+            <div class="kpi-value" id="kpi-charges">₹0.00</div>
+            <div class="kpi-subtext">STT, Brokerage, GST, Exch</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-title">Avg Win / Avg Loss</div>
+            <div class="kpi-value" id="kpi-avg-win-loss">₹0 / ₹0</div>
+            <div class="kpi-subtext" id="kpi-rr-ratio">Risk-Reward Metric</div>
+        </div>
+    </div>
+
+    <!-- Charts Grid -->
+    <div class="charts-grid">
+        <div class="chart-card">
+            <div class="chart-header">Cumulative Net Equity Curve (₹)</div>
+            <canvas id="equityChart" height="130"></canvas>
+        </div>
+        <div class="chart-card">
+            <div class="chart-header">PnL by Underlying Symbol</div>
+            <canvas id="symbolChart" height="200"></canvas>
+        </div>
+    </div>
+
+    <!-- Trade Log Table -->
+    <div class="table-container">
+        <div class="chart-header" style="margin-bottom: 12px;">Detailed Trade History</div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Exit Time</th>
+                    <th>Contract</th>
+                    <th>Underlying</th>
+                    <th>Type</th>
+                    <th>Qty</th>
+                    <th>Buy Price</th>
+                    <th>Exit Price</th>
+                    <th>Gross PnL</th>
+                    <th>Taxes & Fees</th>
+                    <th>Net PnL</th>
+                    <th>ROI %</th>
+                    <th>Exit Reason</th>
+                    <th>Duration</th>
+                </tr>
+            </thead>
+            <tbody id="trade-table-body">
+                <!-- Dynamically Populated -->
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        const allTrades = [{"id": 2, "contract_symbol": "BANKNIFTY51500PE", "symbol": "BANKNIFTY", "instrument_type": "INDEX", "option_type": "PE", "strike": 51500.0, "quantity": 30, "entry_price": 189.16, "exit_price": 248.11, "entry_time": "2026-10-06 09:30:32", "exit_time": "2026-10-06 10:02:32", "exit_reason": "Target Profit Reached", "gross_pnl": 1768.5, "brokerage": 40.0, "stt": 7.44, "exchange_charges": 6.56, "gst": 8.38, "stamp_duty": 0.17, "total_charges": 62.55, "net_pnl": 1705.95, "roi_pct": 31.2, "holding_duration": "32m", "trading_mode": "INTRADAY"}, {"id": 3, "contract_symbol": "HDFCBANK1740PE", "symbol": "HDFCBANK", "instrument_type": "STOCK", "option_type": "PE", "strike": 1740.0, "quantity": 1000, "entry_price": 120.51, "exit_price": 144.4, "entry_time": "2026-10-06 12:34:32", "exit_time": "2026-10-06 12:49:32", "exit_reason": "Trailing SL Hit", "gross_pnl": 23890.0, "brokerage": 40.0, "stt": 144.4, "exchange_charges": 132.46, "gst": 31.04, "stamp_duty": 3.62, "total_charges": 351.52, "net_pnl": 23538.48, "roi_pct": 19.8, "holding_duration": "15m", "trading_mode": "INTRADAY"}, {"id": 18, "contract_symbol": "SENSEX79500CE", "symbol": "SENSEX", "instrument_type": "INDEX", "option_type": "CE", "strike": 79500.0, "quantity": 10, "entry_price": 149.73, "exit_price": 176.71, "entry_time": "2026-10-07 09:16:32", "exit_time": "2026-10-07 09:48:32", "exit_reason": "Trailing SL Hit", "gross_pnl": 269.8, "brokerage": 40.0, "stt": 1.77, "exchange_charges": 1.63, "gst": 7.49, "stamp_duty": 0.04, "total_charges": 50.93, "net_pnl": 218.87, "roi_pct": 18.0, "holding_duration": "32m", "trading_mode": "INTRADAY"}, {"id": 12, "contract_symbol": "RELIANCE2980PE", "symbol": "RELIANCE", "instrument_type": "STOCK", "option_type": "PE", "strike": 2980.0, "quantity": 500, "entry_price": 162.69, "exit_price": 193.21, "entry_time": "2026-10-08 09:23:32", "exit_time": "2026-10-08 09:53:32", "exit_reason": "Trailing SL Hit", "gross_pnl": 15260.0, "brokerage": 40.0, "stt": 96.61, "exchange_charges": 88.98, "gst": 23.22, "stamp_duty": 2.44, "total_charges": 251.25, "net_pnl": 15008.75, "roi_pct": 18.8, "holding_duration": "30m", "trading_mode": "INTRADAY"}, {"id": 25, "contract_symbol": "HDFCBANK1740CE", "symbol": "HDFCBANK", "instrument_type": "STOCK", "option_type": "CE", "strike": 1740.0, "quantity": 500, "entry_price": 203.13, "exit_price": 249.51, "entry_time": "2026-10-08 11:33:32", "exit_time": "2026-10-08 11:52:32", "exit_reason": "Trailing SL Hit", "gross_pnl": 23190.0, "brokerage": 40.0, "stt": 124.76, "exchange_charges": 113.16, "gst": 27.57, "stamp_duty": 3.05, "total_charges": 308.54, "net_pnl": 22881.46, "roi_pct": 22.8, "holding_duration": "19m", "trading_mode": "INTRADAY"}, {"id": 26, "contract_symbol": "RELIANCE2980CE", "symbol": "RELIANCE", "instrument_type": "STOCK", "option_type": "CE", "strike": 2980.0, "quantity": 250, "entry_price": 99.86, "exit_price": 132.62, "entry_time": "2026-10-09 12:19:32", "exit_time": "2026-10-09 12:47:32", "exit_reason": "Target Profit Reached", "gross_pnl": 8190.0, "brokerage": 40.0, "stt": 33.16, "exchange_charges": 29.06, "gst": 12.43, "stamp_duty": 0.75, "total_charges": 115.4, "net_pnl": 8074.6, "roi_pct": 32.8, "holding_duration": "28m", "trading_mode": "INTRADAY"}, {"id": 17, "contract_symbol": "HDFCBANK1740CE", "symbol": "HDFCBANK", "instrument_type": "STOCK", "option_type": "CE", "strike": 1740.0, "quantity": 1000, "entry_price": 248.65, "exit_price": 289.42, "entry_time": "2026-10-11 09:26:32", "exit_time": "2026-10-11 10:11:32", "exit_reason": "Trailing SL Hit", "gross_pnl": 40770.0, "brokerage": 40.0, "stt": 289.42, "exchange_charges": 269.04, "gst": 55.63, "stamp_duty": 7.46, "total_charges": 661.55, "net_pnl": 40108.45, "roi_pct": 16.4, "holding_duration": "45m", "trading_mode": "INTRADAY"}, {"id": 19, "contract_symbol": "NIFTY24200PE", "symbol": "NIFTY", "instrument_type": "INDEX", "option_type": "PE", "strike": 24200.0, "quantity": 25, "entry_price": 212.8, "exit_price": 261.98, "entry_time": "2026-10-11 10:37:32", "exit_time": "2026-10-11 11:20:32", "exit_reason": "Trailing SL Hit", "gross_pnl": 1229.5, "brokerage": 40.0, "stt": 6.55, "exchange_charges": 5.93, "gst": 8.27, "stamp_duty": 0.16, "total_charges": 60.91, "net_pnl": 1168.59, "roi_pct": 23.1, "holding_duration": "43m", "trading_mode": "INTRADAY"}, {"id": 20, "contract_symbol": "BANKNIFTY51500PE", "symbol": "BANKNIFTY", "instrument_type": "INDEX", "option_type": "PE", "strike": 51500.0, "quantity": 15, "entry_price": 143.18, "exit_price": 169.07, "entry_time": "2026-10-15 12:30:32", "exit_time": "2026-10-15 13:05:32", "exit_reason": "Trailing SL Hit", "gross_pnl": 388.35, "brokerage": 40.0, "stt": 2.54, "exchange_charges": 2.34, "gst": 7.62, "stamp_duty": 0.06, "total_charges": 52.56, "net_pnl": 335.79, "roi_pct": 18.1, "holding_duration": "35m", "trading_mode": "INTRADAY"}, {"id": 13, "contract_symbol": "BANKNIFTY51500CE", "symbol": "BANKNIFTY", "instrument_type": "INDEX", "option_type": "CE", "strike": 51500.0, "quantity": 30, "entry_price": 207.27, "exit_price": 176.6, "entry_time": "2026-10-16 13:39:32", "exit_time": "2026-10-16 14:01:32", "exit_reason": "Stop-Loss Hit", "gross_pnl": -920.1, "brokerage": 40.0, "stt": 5.3, "exchange_charges": 5.76, "gst": 8.24, "stamp_duty": 0.19, "total_charges": 59.49, "net_pnl": -979.59, "roi_pct": -14.8, "holding_duration": "22m", "trading_mode": "INTRADAY"}, {"id": 6, "contract_symbol": "RELIANCE2980CE", "symbol": "RELIANCE", "instrument_type": "STOCK", "option_type": "CE", "strike": 2980.0, "quantity": 500, "entry_price": 175.05, "exit_price": 211.68, "entry_time": "2026-10-16 13:23:32", "exit_time": "2026-10-16 14:07:32", "exit_reason": "Trailing SL Hit", "gross_pnl": 18315.0, "brokerage": 40.0, "stt": 105.84, "exchange_charges": 96.68, "gst": 24.6, "stamp_duty": 2.63, "total_charges": 269.75, "net_pnl": 18045.25, "roi_pct": 20.9, "holding_duration": "44m", "trading_mode": "INTRADAY"}, {"id": 4, "contract_symbol": "RELIANCE2980CE", "symbol": "RELIANCE", "instrument_type": "STOCK", "option_type": "CE", "strike": 2980.0, "quantity": 500, "entry_price": 243.68, "exit_price": 328.25, "entry_time": "2026-10-18 12:36:32", "exit_time": "2026-10-18 12:50:32", "exit_reason": "Target Profit Reached", "gross_pnl": 42285.0, "brokerage": 40.0, "stt": 164.12, "exchange_charges": 142.98, "gst": 32.94, "stamp_duty": 3.66, "total_charges": 383.7, "net_pnl": 41901.3, "roi_pct": 34.7, "holding_duration": "14m", "trading_mode": "INTRADAY"}, {"id": 8, "contract_symbol": "RELIANCE2980PE", "symbol": "RELIANCE", "instrument_type": "STOCK", "option_type": "PE", "strike": 2980.0, "quantity": 250, "entry_price": 225.05, "exit_price": 280.87, "entry_time": "2026-10-19 11:44:32", "exit_time": "2026-10-19 12:11:32", "exit_reason": "Trailing SL Hit", "gross_pnl": 13955.0, "brokerage": 40.0, "stt": 70.22, "exchange_charges": 63.24, "gst": 18.58, "stamp_duty": 1.69, "total_charges": 193.73, "net_pnl": 13761.27, "roi_pct": 24.8, "holding_duration": "27m", "trading_mode": "INTRADAY"}, {"id": 10, "contract_symbol": "RELIANCE2980CE", "symbol": "RELIANCE", "instrument_type": "STOCK", "option_type": "CE", "strike": 2980.0, "quantity": 250, "entry_price": 156.92, "exit_price": 180.98, "entry_time": "2026-10-21 12:21:32", "exit_time": "2026-10-21 12:56:32", "exit_reason": "Trailing SL Hit", "gross_pnl": 6015.0, "brokerage": 40.0, "stt": 45.24, "exchange_charges": 42.24, "gst": 14.8, "stamp_duty": 1.18, "total_charges": 143.46, "net_pnl": 5871.54, "roi_pct": 15.3, "holding_duration": "35m", "trading_mode": "INTRADAY"}, {"id": 23, "contract_symbol": "NIFTY24200CE", "symbol": "NIFTY", "instrument_type": "INDEX", "option_type": "CE", "strike": 24200.0, "quantity": 25, "entry_price": 208.53, "exit_price": 281.52, "entry_time": "2026-10-21 14:01:32", "exit_time": "2026-10-21 14:15:32", "exit_reason": "Target Profit Reached", "gross_pnl": 1824.75, "brokerage": 40.0, "stt": 7.04, "exchange_charges": 6.13, "gst": 8.3, "stamp_duty": 0.16, "total_charges": 61.63, "net_pnl": 1763.12, "roi_pct": 35.0, "holding_duration": "14m", "trading_mode": "INTRADAY"}, {"id": 15, "contract_symbol": "BANKNIFTY51500CE", "symbol": "BANKNIFTY", "instrument_type": "INDEX", "option_type": "CE", "strike": 51500.0, "quantity": 30, "entry_price": 244.77, "exit_price": 288.69, "entry_time": "2026-10-23 11:58:32", "exit_time": "2026-10-23 12:19:32", "exit_reason": "Trailing SL Hit", "gross_pnl": 1317.6, "brokerage": 40.0, "stt": 8.66, "exchange_charges": 8.0, "gst": 8.64, "stamp_duty": 0.22, "total_charges": 65.52, "net_pnl": 1252.08, "roi_pct": 17.9, "holding_duration": "21m", "trading_mode": "INTRADAY"}, {"id": 24, "contract_symbol": "SENSEX79500PE", "symbol": "SENSEX", "instrument_type": "INDEX", "option_type": "PE", "strike": 79500.0, "quantity": 20, "entry_price": 245.9, "exit_price": 211.17, "entry_time": "2026-10-24 12:40:32", "exit_time": "2026-10-24 13:05:32", "exit_reason": "Stop-Loss Hit", "gross_pnl": -694.6, "brokerage": 40.0, "stt": 4.22, "exchange_charges": 4.57, "gst": 8.02, "stamp_duty": 0.15, "total_charges": 56.96, "net_pnl": -751.56, "roi_pct": -14.1, "holding_duration": "25m", "trading_mode": "INTRADAY"}, {"id": 21, "contract_symbol": "BANKNIFTY51500CE", "symbol": "BANKNIFTY", "instrument_type": "INDEX", "option_type": "CE", "strike": 51500.0, "quantity": 15, "entry_price": 243.8, "exit_price": 306.19, "entry_time": "2026-10-24 13:09:32", "exit_time": "2026-10-24 13:45:32", "exit_reason": "Trailing SL Hit", "gross_pnl": 935.85, "brokerage": 40.0, "stt": 4.59, "exchange_charges": 4.12, "gst": 7.94, "stamp_duty": 0.11, "total_charges": 56.76, "net_pnl": 879.09, "roi_pct": 25.6, "holding_duration": "36m", "trading_mode": "INTRADAY"}, {"id": 5, "contract_symbol": "NIFTY24200CE", "symbol": "NIFTY", "instrument_type": "INDEX", "option_type": "CE", "strike": 24200.0, "quantity": 50, "entry_price": 166.0, "exit_price": 220.82, "entry_time": "2026-10-26 09:19:32", "exit_time": "2026-10-26 09:42:32", "exit_reason": "Target Profit Reached", "gross_pnl": 2741.0, "brokerage": 40.0, "stt": 11.04, "exchange_charges": 9.67, "gst": 8.94, "stamp_duty": 0.25, "total_charges": 69.9, "net_pnl": 2671.1, "roi_pct": 33.0, "holding_duration": "23m", "trading_mode": "INTRADAY"}, {"id": 7, "contract_symbol": "SENSEX79500CE", "symbol": "SENSEX", "instrument_type": "INDEX", "option_type": "CE", "strike": 79500.0, "quantity": 10, "entry_price": 119.41, "exit_price": 147.81, "entry_time": "2026-10-27 09:54:32", "exit_time": "2026-10-27 10:10:32", "exit_reason": "Trailing SL Hit", "gross_pnl": 284.0, "brokerage": 40.0, "stt": 1.48, "exchange_charges": 1.34, "gst": 7.44, "stamp_duty": 0.04, "total_charges": 50.3, "net_pnl": 233.7, "roi_pct": 23.8, "holding_duration": "16m", "trading_mode": "INTRADAY"}, {"id": 22, "contract_symbol": "NIFTY24200CE", "symbol": "NIFTY", "instrument_type": "INDEX", "option_type": "CE", "strike": 24200.0, "quantity": 25, "entry_price": 247.33, "exit_price": 322.34, "entry_time": "2026-10-27 12:47:32", "exit_time": "2026-10-27 12:59:32", "exit_reason": "Target Profit Reached", "gross_pnl": 1875.25, "brokerage": 40.0, "stt": 8.06, "exchange_charges": 7.12, "gst": 8.48, "stamp_duty": 0.19, "total_charges": 63.85, "net_pnl": 1811.4, "roi_pct": 30.3, "holding_duration": "12m", "trading_mode": "INTRADAY"}, {"id": 14, "contract_symbol": "HDFCBANK1740PE", "symbol": "HDFCBANK", "instrument_type": "STOCK", "option_type": "PE", "strike": 1740.0, "quantity": 1000, "entry_price": 230.05, "exit_price": 316.71, "entry_time": "2026-10-28 10:08:32", "exit_time": "2026-10-28 10:48:32", "exit_reason": "Target Profit Reached", "gross_pnl": 86660.0, "brokerage": 40.0, "stt": 316.71, "exchange_charges": 273.38, "gst": 56.41, "stamp_duty": 6.9, "total_charges": 693.4, "net_pnl": 85966.6, "roi_pct": 37.7, "holding_duration": "40m", "trading_mode": "INTRADAY"}, {"id": 16, "contract_symbol": "SENSEX79500CE", "symbol": "SENSEX", "instrument_type": "INDEX", "option_type": "CE", "strike": 79500.0, "quantity": 10, "entry_price": 139.26, "exit_price": 183.09, "entry_time": "2026-10-29 10:05:32", "exit_time": "2026-10-29 10:46:32", "exit_reason": "Target Profit Reached", "gross_pnl": 438.3, "brokerage": 40.0, "stt": 1.83, "exchange_charges": 1.61, "gst": 7.49, "stamp_duty": 0.04, "total_charges": 50.97, "net_pnl": 387.33, "roi_pct": 31.5, "holding_duration": "41m", "trading_mode": "INTRADAY"}, {"id": 11, "contract_symbol": "HDFCBANK1740PE", "symbol": "HDFCBANK", "instrument_type": "STOCK", "option_type": "PE", "strike": 1740.0, "quantity": 500, "entry_price": 168.02, "exit_price": 226.5, "entry_time": "2026-11-02 13:42:32", "exit_time": "2026-11-02 13:54:32", "exit_reason": "Target Profit Reached", "gross_pnl": 29240.0, "brokerage": 40.0, "stt": 113.25, "exchange_charges": 98.63, "gst": 24.95, "stamp_duty": 2.52, "total_charges": 279.35, "net_pnl": 28960.65, "roi_pct": 34.8, "holding_duration": "12m", "trading_mode": "INTRADAY"}, {"id": 9, "contract_symbol": "FINNIFTY23800CE", "symbol": "FINNIFTY", "instrument_type": "INDEX", "option_type": "CE", "strike": 23800.0, "quantity": 25, "entry_price": 208.35, "exit_price": 178.25, "entry_time": "2026-11-03 09:54:32", "exit_time": "2026-11-03 10:19:32", "exit_reason": "Stop-Loss Hit", "gross_pnl": -752.5, "brokerage": 40.0, "stt": 4.46, "exchange_charges": 4.83, "gst": 8.07, "stamp_duty": 0.16, "total_charges": 57.52, "net_pnl": -810.02, "roi_pct": -14.4, "holding_duration": "25m", "trading_mode": "INTRADAY"}, {"id": 1, "contract_symbol": "NIFTY05NOV24250CE", "symbol": "NIFTY", "instrument_type": "INDEX", "option_type": "CE", "strike": 24250.0, "quantity": 50, "entry_price": 150.5, "exit_price": 202.68, "entry_time": "2026-11-03 15:30:48", "exit_time": "2026-11-03 15:30:48", "exit_reason": "Target Profit Reached", "gross_pnl": 2609.0, "brokerage": 40.0, "stt": 10.13, "exchange_charges": 8.8295, "gst": 8.78931, "stamp_duty": 0.22575, "total_charges": 67.98, "net_pnl": 2541.02, "roi_pct": 33.77, "holding_duration": "0m 0s", "trading_mode": "INTRADAY"}];
+        let currentPeriod = 'all';
+        let equityChartInstance = null;
+        let symbolChartInstance = null;
+
+        function filterPeriod(period) {
+            currentPeriod = period;
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            renderDashboard();
+        }
+
+        function getFilteredTrades() {
+            if (currentPeriod === 'all') return allTrades;
+            const now = new Date();
+            const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+            return allTrades.filter(t => {
+                const exitDate = new Date(t.exit_time);
+                if (currentPeriod === 'daily') {
+                    return exitDate >= startOfDay;
+                } else if (currentPeriod === 'weekly') {
+                    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                    return exitDate >= sevenDaysAgo;
+                } else if (currentPeriod === 'monthly') {
+                    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+                    return exitDate >= thirtyDaysAgo;
+                }
+                return true;
+            });
+        }
+
+        function renderDashboard() {
+            const trades = getFilteredTrades();
+            
+            // KPIs Calculation
+            let netPnl = 0;
+            let grossWins = 0;
+            let grossLosses = 0;
+            let totalCharges = 0;
+            let wins = 0;
+            let losses = 0;
+            let winPnls = [];
+            let lossPnls = [];
+
+            trades.forEach(t => {
+                netPnl += t.net_pnl;
+                totalCharges += t.total_charges;
+                if (t.net_pnl > 0) {
+                    wins++;
+                    grossWins += t.gross_pnl;
+                    winPnls.push(t.net_pnl);
+                } else {
+                    losses++;
+                    grossLosses += Math.abs(t.gross_pnl);
+                    lossPnls.push(Math.abs(t.net_pnl));
+                }
+            });
+
+            const totalTrades = trades.length;
+            const winRate = totalTrades > 0 ? ((wins / totalTrades) * 100).toFixed(1) : '0.0';
+            const profitFactor = grossLosses > 0 ? (grossWins / grossLosses).toFixed(2) : (grossWins > 0 ? '∞' : '0.00');
+            const avgWin = winPnls.length > 0 ? (winPnls.reduce((a,b)=>a+b,0) / winPnls.length).toFixed(0) : '0';
+            const avgLoss = lossPnls.length > 0 ? (lossPnls.reduce((a,b)=>a+b,0) / lossPnls.length).toFixed(0) : '0';
+
+            // Update KPI DOM
+            const netElem = document.getElementById('kpi-net-pnl');
+            netElem.innerText = (netPnl >= 0 ? '+' : '') + '₹' + netPnl.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            netElem.className = 'kpi-value ' + (netPnl >= 0 ? 'positive' : 'negative');
+
+            document.getElementById('kpi-win-rate').innerText = winRate + '%';
+            document.getElementById('kpi-trades-count').innerText = `${totalTrades} Trades (${wins}W / ${losses}L)`;
+            document.getElementById('kpi-profit-factor').innerText = profitFactor;
+            document.getElementById('kpi-charges').innerText = '₹' + totalCharges.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            document.getElementById('kpi-avg-win-loss').innerText = `₹${avgWin} / ₹${avgLoss}`;
+
+            renderCharts(trades);
+            renderTable(trades);
+        }
+
+        function renderCharts(trades) {
+            // 1. Cumulative Equity Curve
+            let cumulative = 0;
+            const labels = [];
+            const equityData = [];
+
+            trades.forEach((t, i) => {
+                cumulative += t.net_pnl;
+                labels.push(t.exit_time.split(' ')[1] || `#${i+1}`);
+                equityData.push(cumulative);
+            });
+
+            const ctx1 = document.getElementById('equityChart').getContext('2d');
+            if (equityChartInstance) equityChartInstance.destroy();
+
+            equityChartInstance = new Chart(ctx1, {
+                type: 'line',
+                data: {
+                    labels: labels.length > 0 ? labels : ['Start'],
+                    datasets: [{
+                        label: 'Net P&L (₹)',
+                        data: equityData.length > 0 ? equityData : [0],
+                        borderColor: cumulative >= 0 ? '#10b981' : '#ef4444',
+                        backgroundColor: cumulative >= 0 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                        fill: true,
+                        tension: 0.25,
+                        pointRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { color: '#1f2937' }, ticks: { color: '#9ca3af' } },
+                        y: { grid: { color: '#1f2937' }, ticks: { color: '#9ca3af' } }
+                    }
+                }
+            });
+
+            // 2. Breakdown by Symbol
+            const symbolMap = {};
+            trades.forEach(t => {
+                symbolMap[t.symbol] = (symbolMap[t.symbol] || 0) + t.net_pnl;
+            });
+
+            const ctx2 = document.getElementById('symbolChart').getContext('2d');
+            if (symbolChartInstance) symbolChartInstance.destroy();
+
+            const symLabels = Object.keys(symbolMap);
+            const symValues = Object.values(symbolMap);
+
+            symbolChartInstance = new Chart(ctx2, {
+                type: 'bar',
+                data: {
+                    labels: symLabels.length > 0 ? symLabels : ['None'],
+                    datasets: [{
+                        data: symValues.length > 0 ? symValues : [0],
+                        backgroundColor: symValues.map(v => v >= 0 ? '#10b981' : '#ef4444'),
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { color: '#9ca3af' } },
+                        y: { grid: { color: '#1f2937' }, ticks: { color: '#9ca3af' } }
+                    }
+                }
+            });
+        }
+
+        function renderTable(trades) {
+            const tbody = document.getElementById('trade-table-body');
+            tbody.innerHTML = '';
+
+            if (trades.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="13" style="text-align:center; color:#6b7280; padding:24px;">No closed trades recorded in this period yet.</td></tr>';
+                return;
+            }
+
+            // Show newest trades first in table
+            const reversed = [...trades].reverse();
+            reversed.forEach(t => {
+                const tr = document.createElement('tr');
+                const isWin = t.net_pnl >= 0;
+                const pnlClass = isWin ? 'positive' : 'negative';
+                const typeBadge = t.option_type === 'CE' ? 'badge-ce' : 'badge-pe';
+
+                tr.innerHTML = `
+                    <td class="mono" style="font-size:12px;">${t.exit_time}</td>
+                    <td><b>${t.contract_symbol}</b></td>
+                    <td>${t.symbol}</td>
+                    <td><span class="badge ${typeBadge}">${t.option_type}</span></td>
+                    <td class="mono">${t.quantity}</td>
+                    <td class="mono">₹${t.entry_price.toFixed(2)}</td>
+                    <td class="mono">₹${t.exit_price.toFixed(2)}</td>
+                    <td class="mono ${pnlClass}">₹${t.gross_pnl.toFixed(2)}</td>
+                    <td class="mono" style="color:#9ca3af;">₹${t.total_charges.toFixed(2)}</td>
+                    <td class="mono ${pnlClass}" style="font-weight:700;">₹${t.net_pnl.toFixed(2)}</td>
+                    <td class="mono ${pnlClass}">${t.roi_pct >= 0 ? '+' : ''}${t.roi_pct.toFixed(1)}%</td>
+                    <td>${t.exit_reason}</td>
+                    <td style="color:#9ca3af;">${t.holding_duration}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // Initialize on load
+        renderDashboard();
+    </script>
+</body>
+</html>
