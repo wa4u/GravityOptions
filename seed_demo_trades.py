@@ -89,9 +89,19 @@ def seed():
         })
 
     # Re-generate report
-    generator = ReportGenerator()
+    import yaml
+    web_path = None
+    try:
+        with open("config/config.yaml", "r") as f:
+            cfg = yaml.safe_load(f)
+            web_path = cfg.get("system", {}).get("web_report_path")
+    except Exception:
+        pass
+
+    generator = ReportGenerator(web_export_path=web_path)
     path = generator.generate_html_report()
     print(f"✅ Seeding complete! Dashboard updated: {path}")
+
 
 if __name__ == "__main__":
     seed()
