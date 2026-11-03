@@ -373,11 +373,13 @@ class TradingEngine:
         
         # Auto-generate HTML performance dashboard
         try:
-            reporter = ReportGenerator()
+            web_path = self.config.get("system", {}).get("web_report_path")
+            reporter = ReportGenerator(web_export_path=web_path)
             report_path = reporter.generate_html_report()
             log.info(f"Updated HTML Performance Dashboard: {report_path}")
         except Exception as e:
             log.error(f"Error auto-generating HTML report: {e}")
+
 
         self.eod_summary_sent = True
 

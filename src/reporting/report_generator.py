@@ -11,10 +11,17 @@ class ReportGenerator:
     with Daily, Weekly, Monthly, and All-Time views, equity curves,
     charge breakdowns, and trade logs.
     """
-    def __init__(self, db_path: str = "data/trading_history.db", output_path: str = "reports/dashboard.html"):
+    def __init__(
+        self,
+        db_path: str = "data/trading_history.db",
+        output_path: str = "reports/dashboard.html",
+        web_export_path: Optional[str] = None
+    ):
         self.logger = TradeLogger(db_path)
         self.output_path = output_path
+        self.web_export_path = web_export_path
         os.makedirs(os.path.dirname(self.output_path), exist_ok=True)
+
 
     def generate_html_report(self) -> str:
         trades = self.logger.fetch_all_trades()
@@ -480,4 +487,16 @@ class ReportGenerator:
             f.write(html_content)
 
         log.info(f"📊 Performance Dashboard successfully exported to: {self.output_path}")
+
+        # If a web export path (e.g., /home/gravitywork/public_html/index.html) is provided
+        if self.web_export_path:
+            try:
+                os.makedirs(os.path.dirname(self.web_export_path), exist_ok=True)
+                with open(self.web_export_path, "w", encoding="utf-8") as f_web:
+                    f_web.write(html_content)
+                log.info(f"🌐 Live Web Report published to: {self.web_export_path}")
+            except Exception as e:
+                log.warning(f"Could not export to web path {self.web_export_path}: {e}")
+
         return os.path.abspath(self.output_path)
+

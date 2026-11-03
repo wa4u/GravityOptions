@@ -9,6 +9,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 import os
 import webbrowser
+import yaml
 from src.reporting.report_generator import ReportGenerator
 from src.utils.logger import log
 
@@ -17,8 +18,17 @@ def main():
     print("   GRAVITY OPTIONS - PERFORMANCE ANALYTICS REPORT GENERATOR")
     print("=" * 60)
 
-    generator = ReportGenerator()
+    web_path = None
+    try:
+        with open("config/config.yaml", "r") as f:
+            cfg = yaml.safe_load(f)
+            web_path = cfg.get("system", {}).get("web_report_path")
+    except Exception:
+        pass
+
+    generator = ReportGenerator(web_export_path=web_path)
     abs_path = generator.generate_html_report()
+
     
     file_url = f"file:///{abs_path.replace(os.sep, '/')}"
     print(f"\n✅ Report generated successfully!")
