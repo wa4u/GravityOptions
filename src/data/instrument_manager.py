@@ -135,8 +135,9 @@ class InstrumentManager:
         option_type: str
     ) -> str:
         """Format standard readable contract ticker (e.g., NIFTY26NOV24200CE)."""
-        strike_str = str(int(strike)) if strike.is_integer() else str(strike)
+        strike_str = str(int(strike)) if int(strike) == strike else str(strike)
         month_str = expiry.strftime("%b").upper()
+
         day_str = expiry.strftime("%d")
         year_str = expiry.strftime("%y")
         return f"{symbol.upper()}{day_str}{month_str}{strike_str}{option_type.upper()}"
