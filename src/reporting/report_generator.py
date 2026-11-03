@@ -1,8 +1,9 @@
 import json
 import os
 from datetime import datetime, timedelta
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from src.execution.trade_logger import TradeLogger
+
 from src.utils.logger import log
 
 class ReportGenerator:
