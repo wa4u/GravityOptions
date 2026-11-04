@@ -160,7 +160,7 @@ class InstrumentManager:
         for sym, item in self.instruments_by_symbol.items():
             if (
                 item.get("name") == sym_upper
-                and item.get("exch_seg") == "NFO"
+                and item.get("exch_seg") in ["NFO", "BFO"]
                 and item.get("instrumenttype") in ["OPTIDX", "OPTSTK"]
                 and sym.endswith(opt_upper)
             ):

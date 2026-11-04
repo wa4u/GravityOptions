@@ -58,6 +58,8 @@ class TradingEngine:
         self.running = False
         self.eod_summary_sent = False
         self.last_heartbeat_time = 0.0
+        self.circuit_breaker_triggered = False
+        self.cooldowns: Dict[str, datetime] = {}
 
     def load_yaml(self, path: str) -> Dict:
         with open(path, "r") as f:
@@ -114,6 +116,8 @@ class TradingEngine:
             if current_price <= pos.stop_loss:
                 record = self.broker.sell_option(contract, current_price, reason="Stop-Loss Hit")
                 if record:
+                    self.cooldowns[pos.symbol] = now + timedelta(minutes=15)
+                    log.info(f"⏳ Cooldown activated: No new trades on {pos.symbol} for 15 minutes.")
                     self.telegram_notifier.notify_order_exit(record.__dict__)
                 continue
 
@@ -121,6 +125,8 @@ class TradingEngine:
             if current_price >= pos.target:
                 record = self.broker.sell_option(contract, current_price, reason="Target Profit Reached")
                 if record:
+                    self.cooldowns[pos.symbol] = now + timedelta(minutes=15)
+                    log.info(f"⏳ Cooldown activated: No new trades on {pos.symbol} for 15 minutes.")
                     self.telegram_notifier.notify_order_exit(record.__dict__)
                 continue
 
@@ -135,6 +141,8 @@ class TradingEngine:
             if self.risk_mgr.check_stagnation(pos, now):
                 record = self.broker.sell_option(contract, current_price, reason="Anti-Theta Stagnation Exit")
                 if record:
+                    self.cooldowns[pos.symbol] = now + timedelta(minutes=15)
+                    log.info(f"⏳ Cooldown activated: No new trades on {pos.symbol} for 15 minutes.")
                     self.telegram_notifier.notify_order_exit(record.__dict__)
                 continue
 
@@ -178,8 +186,12 @@ class TradingEngine:
     def scan_indices(self):
         """Screen active indices for option buying triggers."""
         indices_cfg = self.config.get("indices", {})
+        now = get_now_ist()
         for symbol, cfg in indices_cfg.items():
             if not cfg.get("enabled", False):
+                continue
+
+            if symbol in self.cooldowns and now < self.cooldowns[symbol]:
                 continue
 
             can_trade, reason = self.risk_mgr.can_open_new_trade(self.broker)
@@ -197,7 +209,6 @@ class TradingEngine:
             )
 
             if signal:
-                now = get_now_ist()
                 opt_info = self.instrument_mgr.find_option_contract(symbol, signal.target_strike, signal.option_type)
                 if opt_info:
                     contract_symbol = opt_info["symbol"]
@@ -221,9 +232,12 @@ class TradingEngine:
                     strike=contract_symbol
                 )
 
-                # Real option market price from Angel One NFO or estimated fallback
-                real_premium = self.feed.get_ltp(contract_symbol, exchange="NFO")
-                entry_premium = real_premium if real_premium > 0 else max(100.0, signal.spot_price * 0.008)
+                t_years = time_to_expiry_in_years(expiry, now)
+                exch_seg = "BFO" if symbol.upper() == "SENSEX" else "NFO"
+                real_premium = self.feed.get_ltp(contract_symbol, exchange=exch_seg)
+                entry_premium = real_premium if real_premium > 0 else black_scholes_price(
+                    signal.spot_price, signal.target_strike, t_years, iv=0.15, option_type=signal.option_type
+                )
 
                 quantity, lots = self.risk_mgr.calculate_position_size(
                     symbol=symbol,
@@ -233,7 +247,6 @@ class TradingEngine:
                     configured_lots=cfg.get("fixed_lots", 1)
                 )
 
-                t_years = time_to_expiry_in_years(expiry, now)
                 greeks = calculate_greeks(signal.spot_price, signal.target_strike, t_years, iv=0.15, option_type=signal.option_type)
 
                 pos = self.broker.buy_option(
@@ -274,8 +287,12 @@ class TradingEngine:
         if not stk_cfg.get("enabled", False):
             return
 
+        now = get_now_ist()
         universe = stk_cfg.get("universe", [])
         for symbol in universe:
+            if symbol in self.cooldowns and now < self.cooldowns[symbol]:
+                continue
+
             can_trade, reason = self.risk_mgr.can_open_new_trade(self.broker)
             if not can_trade:
                 break
@@ -292,7 +309,6 @@ class TradingEngine:
             )
 
             if signal:
-                now = get_now_ist()
                 opt_info = self.instrument_mgr.find_option_contract(symbol, signal.target_strike, signal.option_type)
                 if opt_info:
                     contract_symbol = opt_info["symbol"]
@@ -316,8 +332,11 @@ class TradingEngine:
                     strike=contract_symbol
                 )
 
+                t_years = time_to_expiry_in_years(expiry, now)
                 real_premium = self.feed.get_ltp(contract_symbol, exchange="NFO")
-                entry_premium = real_premium if real_premium > 0 else max(25.0, signal.spot_price * 0.02)
+                entry_premium = real_premium if real_premium > 0 else black_scholes_price(
+                    signal.spot_price, signal.target_strike, t_years, iv=0.20, option_type=signal.option_type
+                )
 
                 quantity, lots = self.risk_mgr.calculate_position_size(
                     symbol=symbol,
@@ -364,16 +383,18 @@ class TradingEngine:
         # 1. Risk check
         is_broken, reason = self.risk_mgr.check_circuit_breaker(self.broker)
         if is_broken:
-            # Liquidate all open positions immediately
-            for contract in list(self.broker.positions.keys()):
-                p = self.broker.positions[contract]
-                rec = self.broker.sell_option(contract, p.current_price, reason="Circuit Breaker Cutoff")
-                if rec:
-                    self.telegram_notifier.notify_order_exit(rec.__dict__)
-            self.telegram_notifier.notify_circuit_breaker(
-                current_loss=self.broker.get_portfolio_summary()["total_pnl"],
-                max_loss=self.risk_mgr.max_daily_loss
-            )
+            if not self.circuit_breaker_triggered:
+                for contract in list(self.broker.positions.keys()):
+                    p = self.broker.positions[contract]
+                    rec = self.broker.sell_option(contract, p.current_price, reason="Circuit Breaker Cutoff")
+                    if rec:
+                        self.telegram_notifier.notify_order_exit(rec.__dict__)
+                self.telegram_notifier.notify_circuit_breaker(
+                    current_loss=self.broker.get_portfolio_summary()["total_pnl"],
+                    max_loss=self.risk_mgr.max_daily_loss
+                )
+                self.circuit_breaker_triggered = True
+                log.warning("🛑 CIRCUIT BREAKER TRIGGERED: Daily loss limit hit. Trading halted for today.")
             return
 
         # 2. Update existing trades & evaluate exits

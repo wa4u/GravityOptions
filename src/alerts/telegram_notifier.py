@@ -1,3 +1,4 @@
+import html
 import requests
 import yaml
 from typing import Dict, Any, Optional
@@ -58,6 +59,7 @@ class TelegramNotifier:
             return
         emoji = "⚡"
         color_dot = "🟢" if direction.upper() in ["BUY", "CALL", "CE"] else "🔴"
+        safe_reason = html.escape(str(trigger_reason))
         msg = (
             f"<b>{emoji} SIGNAL DETECTED</b> {color_dot}\n"
             f"━━━━━━━━━━━━━━━━━━\n"
@@ -65,7 +67,7 @@ class TelegramNotifier:
             f"<b>Direction:</b> {direction.upper()}\n"
             f"<b>Target Option:</b> <code>{strike}</code>\n"
             f"<b>Spot Price:</b> ₹{spot:,.2f}\n"
-            f"<b>Trigger Setup:</b> <i>{trigger_reason}</i>\n"
+            f"<b>Trigger Setup:</b> <i>{safe_reason}</i>\n"
             f"<i>Validating risk rules before execution...</i>"
         )
         self.send_message(msg)
