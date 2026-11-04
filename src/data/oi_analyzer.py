@@ -10,11 +10,31 @@ class StrikeOIData:
     ce_symbol: str
     ce_token: str
     ce_oi: int
+    ce_oi_change: int
+    ce_volume: int
     ce_ltp: float
+    ce_net_change: float
+    ce_buildup: str           # "LONG_BUILDUP", "SHORT_COVERING", "SHORT_BUILDUP", "LONG_UNWINDING"
     pe_symbol: str
     pe_token: str
     pe_oi: int
+    pe_oi_change: int
+    pe_volume: int
     pe_ltp: float
+    pe_net_change: float
+    pe_buildup: str
+
+def classify_buildup(price_change: float, oi_change: int) -> str:
+    """Classifies derivative state into the 4 institutional money-flow quadrants."""
+    if price_change > 0 and oi_change > 0:
+        return "LONG_BUILDUP"
+    elif price_change > 0 and oi_change < 0:
+        return "SHORT_COVERING"
+    elif price_change < 0 and oi_change > 0:
+        return "SHORT_BUILDUP"
+    elif price_change < 0 and oi_change < 0:
+        return "LONG_UNWINDING"
+    return "NEUTRAL"
 
 @dataclass
 class OIAnalysisResult:
@@ -99,14 +119,17 @@ class OIAnalyzer:
         if not fetched_items:
             return default_result
 
-        # 3. Map tokens to OI and LTP
-        token_stats: Dict[str, Dict[str, float]] = {}
+        # 3. Map tokens to OI, volume, and price changes
+        token_stats: Dict[str, Dict[str, Any]] = {}
         for item in fetched_items:
             tok = str(item.get("symbolToken", item.get("token", "")))
             if tok:
                 token_stats[tok] = {
                     "oi": int(item.get("openInterest", item.get("opnInterest", 0)) or 0),
-                    "ltp": float(item.get("ltp", 0.0) or 0.0)
+                    "oi_change": int(item.get("opnInterestChange", item.get("changeInOpenInterest", 0)) or 0),
+                    "volume": int(item.get("tradeVolume", item.get("volume", 0)) or 0),
+                    "ltp": float(item.get("ltp", 0.0) or 0.0),
+                    "net_change": float(item.get("netChange", item.get("pChange", 0.0)) or 0.0)
                 }
 
         strikes_data: List[StrikeOIData] = []
@@ -124,8 +147,8 @@ class OIAnalyzer:
             ce_tok = str(ce_item.get("token", ""))
             pe_tok = str(pe_item.get("token", ""))
 
-            ce_stat = token_stats.get(ce_tok, {"oi": 0, "ltp": 0.0})
-            pe_stat = token_stats.get(pe_tok, {"oi": 0, "ltp": 0.0})
+            ce_stat = token_stats.get(ce_tok, {"oi": 0, "oi_change": 0, "volume": 0, "ltp": 0.0, "net_change": 0.0})
+            pe_stat = token_stats.get(pe_tok, {"oi": 0, "oi_change": 0, "volume": 0, "ltp": 0.0, "net_change": 0.0})
 
             ce_oi = ce_stat["oi"]
             pe_oi = pe_stat["oi"]
@@ -146,11 +169,19 @@ class OIAnalyzer:
                 ce_symbol=ce_item.get("symbol", ""),
                 ce_token=ce_tok,
                 ce_oi=ce_oi,
+                ce_oi_change=ce_stat["oi_change"],
+                ce_volume=ce_stat["volume"],
                 ce_ltp=ce_stat["ltp"],
+                ce_net_change=ce_stat["net_change"],
+                ce_buildup=classify_buildup(ce_stat["net_change"], ce_stat["oi_change"]),
                 pe_symbol=pe_item.get("symbol", ""),
                 pe_token=pe_tok,
                 pe_oi=pe_oi,
-                pe_ltp=pe_stat["ltp"]
+                pe_oi_change=pe_stat["oi_change"],
+                pe_volume=pe_stat["volume"],
+                pe_ltp=pe_stat["ltp"],
+                pe_net_change=pe_stat["net_change"],
+                pe_buildup=classify_buildup(pe_stat["net_change"], pe_stat["oi_change"])
             ))
 
         # Check if we got meaningful OI data
@@ -252,3 +283,71 @@ class OIAnalyzer:
             return True, f"OI Confirmed: PCR {pcr:.2f} | Put Wall ₹{oi_result.put_wall:,.0f} | Call Wall ₹{oi_result.call_wall:,.0f}"
 
         return True, "OK"
+
+    def find_best_strike_by_volume(
+        self,
+        symbol: str,
+        spot_price: float,
+        direction: str,
+        num_strikes: int = 4
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Inspects the option chain near ATM (± num_strikes) and selects the
+        #1 most active, liquid strike with proven institutional Long Build-Up or Short Covering.
+        Inspired by Mr. Chartist's SUPREMEIND 3600 CE trade selection.
+        """
+        analysis = self.analyze_symbol(symbol, spot_price, num_strikes=num_strikes)
+        if not analysis or not analysis.is_valid or not analysis.strikes_data:
+            return None
+
+        candidates = []
+        is_call = direction.upper() in ["BUY_CALL", "CE", "CALL"]
+
+        for row in analysis.strikes_data:
+            if is_call:
+                vol = row.ce_volume
+                oi_chg = row.ce_oi_change
+                buildup = row.ce_buildup
+                sym = row.ce_symbol
+                tok = row.ce_token
+                ltp = row.ce_ltp
+            else:
+                vol = row.pe_volume
+                oi_chg = row.pe_oi_change
+                buildup = row.pe_buildup
+                sym = row.pe_symbol
+                tok = row.pe_token
+                ltp = row.pe_ltp
+
+            if vol > 0 or row.strike:
+                # Score candidate: bonus for LONG_BUILDUP (+50%) or SHORT_COVERING (+30%)
+                score = float(vol)
+                if buildup == "LONG_BUILDUP":
+                    score = score * 1.5 + 100.0
+                elif buildup == "SHORT_COVERING":
+                    score = score * 1.3 + 50.0
+                elif buildup == "SHORT_BUILDUP":
+                    score = score * 0.5  # Penalize institutional writing resistance
+
+                candidates.append({
+                    "strike": row.strike,
+                    "symbol": sym,
+                    "token": tok,
+                    "ltp": ltp,
+                    "volume": vol,
+                    "oi_change": oi_chg,
+                    "buildup": buildup,
+                    "score": score
+                })
+
+        if candidates:
+            # Sort by score (volume + buildup confirmation)
+            candidates.sort(key=lambda x: x["score"], reverse=True)
+            best = candidates[0]
+            log.info(
+                f"🎯 [Smart Strike Selection] {symbol} {direction}: Selected strike ₹{best['strike']:,.0f} "
+                f"({best['buildup']}, Vol: {best['volume']:,}, LTP: ₹{best['ltp']:.2f})"
+            )
+            return best
+
+        return None

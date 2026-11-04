@@ -72,26 +72,31 @@ indices:
 # Stock Options Screener & Universe Configuration
 stocks:
   enabled: true
-  # Top liquid F&O candidates for high momentum
+  # High-Beta Momentum F&O Runners + Core Large-caps
   universe:
+    # High-Alpha F&O Momentum Rockets (Proven Multi-bagger Runners)
+    - "SUPREMEIND"
+    - "BOSCHLTD"
+    - "SOLARINDS"
+    - "DIXON"
+    - "TRENT"
+    - "MCX"
+    - "POLYCAB"
+    - "POLICYBZR"
+    - "TVSMOTOR"
+    - "HEROMOTOCO"
+    - "HAL"
+    - "BEL"
+    # Core High-Volume F&O Large-Caps
     - "RELIANCE"
-    - "HDFCBANK"
     - "ICICIBANK"
-    - "INFY"
     - "SBIN"
-    - "TATAMOTORS"
-    - "TCS"
-    - "LT"
     - "BHARTIARTL"
-    - "AXISBANK"
-    - "MARUTI"
-    - "KOTAKBANK"
-    - "BAJFINANCE"
+    - "TATAMOTORS"
     - "M&M"
-    - "SUNPHARMA"
 
   fixed_lots: 1
-  min_rvol: 1.8              # Relative volume multiplier required to qualify
+  min_rvol: 1.5              # Relative volume multiplier required to qualify
   min_atr_pct: 1.2           # Minimum daily ATR percentage for momentum
   carry_forward:
     enabled: true            # Allow overnight hold if criteria pass

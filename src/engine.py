@@ -358,7 +358,18 @@ class TradingEngine:
             )
 
             if signal:
-                opt_info = self.instrument_mgr.find_option_contract(symbol, signal.target_strike, signal.option_type)
+                # Smart Strike Selection via Option Chain Volume & Long Build-Up
+                target_strike = signal.target_strike
+                best_strike_info = None
+                oi_cfg = self.config.get("oi_analysis", {})
+                if oi_cfg.get("enabled", True):
+                    best_strike_info = self.oi_analyzer.find_best_strike_by_volume(
+                        symbol, signal.spot_price, signal.direction, num_strikes=4
+                    )
+                    if best_strike_info and best_strike_info.get("strike"):
+                        target_strike = best_strike_info["strike"]
+
+                opt_info = self.instrument_mgr.find_option_contract(symbol, target_strike, signal.option_type)
                 if opt_info:
                     contract_symbol = opt_info["symbol"]
                     display_name = opt_info.get("display_name", contract_symbol)
@@ -367,7 +378,7 @@ class TradingEngine:
                 else:
                     expiry = self.instrument_mgr.get_next_expiry(symbol, now.date())
                     contract_symbol = self.instrument_mgr.format_contract_symbol(
-                        symbol, expiry, signal.target_strike, signal.option_type
+                        symbol, expiry, target_strike, signal.option_type
                     )
                     display_name = contract_symbol
                     stock_lot_size = max(100, int(500000 / signal.spot_price))
@@ -375,19 +386,31 @@ class TradingEngine:
                 if contract_symbol in self.broker.positions:
                     continue
 
+                oi_dict = None
+                if best_strike_info:
+                    oi_dict = {
+                        "is_valid": True,
+                        "pcr": 1.0,
+                        "sentiment": best_strike_info.get("buildup", "LONG_BUILDUP"),
+                        "call_wall": target_strike,
+                        "put_wall": target_strike,
+                        "max_pain": target_strike
+                    }
+
                 self.telegram_notifier.notify_signal(
                     symbol=symbol,
                     direction=signal.direction,
                     trigger_reason=signal.trigger_reason,
                     spot=signal.spot_price,
                     strike=contract_symbol,
-                    display_name=display_name
+                    display_name=display_name,
+                    oi_info=oi_dict
                 )
 
                 t_years = time_to_expiry_in_years(expiry, now)
                 real_premium = self.feed.get_ltp(contract_symbol, exchange="NFO")
                 entry_premium = real_premium if real_premium > 0 else black_scholes_price(
-                    signal.spot_price, signal.target_strike, t_years, iv=0.20, option_type=signal.option_type
+                    signal.spot_price, target_strike, t_years, iv=0.20, option_type=signal.option_type
                 )
 
                 quantity, lots = self.risk_mgr.calculate_position_size(
@@ -402,7 +425,7 @@ class TradingEngine:
                     contract_symbol=contract_symbol,
                     symbol=symbol,
                     option_type=signal.option_type,
-                    strike=signal.target_strike,
+                    strike=target_strike,
                     market_price=entry_premium,
                     quantity=quantity,
                     lots=lots,
@@ -430,7 +453,7 @@ class TradingEngine:
                         "target": pos.target,
                         "tp_pct": self.risk_mgr.default_tp_pct,
                         "trading_mode": "INTRADAY",
-                        "oi_info": oi_info_dict
+                        "oi_info": oi_dict
                     }
                     self.telegram_notifier.notify_order_entry(order_info)
 

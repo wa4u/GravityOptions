@@ -78,7 +78,15 @@ KNOWN_TOKENS = {
     "ZOMATO": ("5097", "ZOMATO-EQ", "NSE"),
     "BEL": ("383", "BEL-EQ", "NSE"),
     "HAL": ("2303", "HAL-EQ", "NSE"),
-    "TRENT": ("1964", "TRENT-EQ", "NSE")
+    "TRENT": ("1964", "TRENT-EQ", "NSE"),
+    "SUPREMEIND": ("3363", "SUPREMEIND-EQ", "NSE"),
+    "BOSCHLTD": ("2181", "BOSCHLTD-EQ", "NSE"),
+    "SOLARINDS": ("13332", "SOLARINDS-EQ", "NSE"),
+    "DIXON": ("21690", "DIXON-EQ", "NSE"),
+    "POLYCAB": ("9590", "POLYCAB-EQ", "NSE"),
+    "POLICYBZR": ("6656", "POLICYBZR-EQ", "NSE"),
+    "MCX": ("31181", "MCX-EQ", "NSE"),
+    "TVSMOTOR": ("8479", "TVSMOTOR-EQ", "NSE")
 }
 
 INTERVAL_MAP = {
