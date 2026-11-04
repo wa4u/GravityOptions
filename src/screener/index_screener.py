@@ -76,9 +76,10 @@ class IndexScreener:
         last_row = df.iloc[-1]
         prev_row = df.iloc[-2]
 
-        # Morning Opening Range (First 15-30m bar)
-        orb_high = df.iloc[0:2]["high"].max()
-        orb_low = df.iloc[0:2]["low"].min()
+        # Morning Opening Range: First 15-minute range (first 3 bars of 5m or 2 bars of 15m)
+        orb_bars = 3 if len(df) >= 6 else 2
+        orb_high = df.iloc[0:orb_bars]["high"].max()
+        orb_low = df.iloc[0:orb_bars]["low"].min()
 
         current_close = last_row["close"]
         vwap = last_row["vwap"]

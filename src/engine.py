@@ -60,6 +60,8 @@ class TradingEngine:
         self.last_heartbeat_time = 0.0
         self.circuit_breaker_triggered = False
         self.cooldowns: Dict[str, datetime] = {}
+        self.candle_interval = self.config.get("system", {}).get("candle_interval", "5m")
+        self.cooldown_mins = self.config.get("system", {}).get("trade_cooldown_mins", 3)
 
     def load_yaml(self, path: str) -> Dict:
         with open(path, "r") as f:
@@ -116,18 +118,20 @@ class TradingEngine:
             if current_price <= pos.stop_loss:
                 record = self.broker.sell_option(contract, current_price, reason="Stop-Loss Hit")
                 if record:
-                    self.cooldowns[pos.symbol] = now + timedelta(minutes=15)
-                    log.info(f"⏳ Cooldown activated: No new trades on {pos.symbol} for 15 minutes.")
+                    self.cooldowns[pos.symbol] = now + timedelta(minutes=self.cooldown_mins)
+                    log.info(f"⏳ Cooldown activated: No new trades on {pos.symbol} for {self.cooldown_mins} minutes.")
                     self.telegram_notifier.notify_order_exit(record.__dict__)
+                    self._export_live_web_report()
                 continue
 
             # 2. Check Target Profit
             if current_price >= pos.target:
                 record = self.broker.sell_option(contract, current_price, reason="Target Profit Reached")
                 if record:
-                    self.cooldowns[pos.symbol] = now + timedelta(minutes=15)
-                    log.info(f"⏳ Cooldown activated: No new trades on {pos.symbol} for 15 minutes.")
+                    self.cooldowns[pos.symbol] = now + timedelta(minutes=self.cooldown_mins)
+                    log.info(f"⏳ Cooldown activated: No new trades on {pos.symbol} for {self.cooldown_mins} minutes.")
                     self.telegram_notifier.notify_order_exit(record.__dict__)
+                    self._export_live_web_report()
                 continue
 
             # 3. Check Trailing Stop
@@ -141,9 +145,10 @@ class TradingEngine:
             if self.risk_mgr.check_stagnation(pos, now):
                 record = self.broker.sell_option(contract, current_price, reason="Anti-Theta Stagnation Exit")
                 if record:
-                    self.cooldowns[pos.symbol] = now + timedelta(minutes=15)
-                    log.info(f"⏳ Cooldown activated: No new trades on {pos.symbol} for 15 minutes.")
+                    self.cooldowns[pos.symbol] = now + timedelta(minutes=self.cooldown_mins)
+                    log.info(f"⏳ Cooldown activated: No new trades on {pos.symbol} for {self.cooldown_mins} minutes.")
                     self.telegram_notifier.notify_order_exit(record.__dict__)
+                    self._export_live_web_report()
                 continue
 
     def handle_intraday_square_off(self):
@@ -198,7 +203,7 @@ class TradingEngine:
             if not can_trade:
                 break
 
-            candles = self.feed.get_historical_candles(symbol, symbol, interval="15m", count=40)
+            candles = self.feed.get_historical_candles(symbol, symbol, interval=self.candle_interval, count=40)
             if not candles:
                 continue
 
@@ -297,7 +302,7 @@ class TradingEngine:
             if not can_trade:
                 break
 
-            candles = self.feed.get_historical_candles(symbol, symbol, interval="15m", count=40)
+            candles = self.feed.get_historical_candles(symbol, symbol, interval=self.candle_interval, count=40)
             if not candles:
                 continue
 
@@ -394,6 +399,7 @@ class TradingEngine:
                     max_loss=self.risk_mgr.max_daily_loss
                 )
                 self.circuit_breaker_triggered = True
+                self._export_live_web_report()
                 log.warning("🛑 CIRCUIT BREAKER TRIGGERED: Daily loss limit hit. Trading halted for today.")
             return
 
@@ -470,6 +476,17 @@ class TradingEngine:
         except Exception:
             pass
 
+    def _export_live_web_report(self):
+        """Immediately update public_html/index.html with fresh closed trades and analytics."""
+        try:
+            web_path = self.config.get("system", {}).get("web_report_path")
+            if web_path:
+                reporter = ReportGenerator(web_export_path=web_path)
+                report_path = reporter.generate_html_report()
+                log.info(f"🌐 Live web dashboard updated: {report_path}")
+        except Exception as e:
+            log.error(f"Error auto-exporting live web report: {e}")
+
     def generate_eod_summary(self):
         """Send End-of-Day summary."""
         if self.eod_summary_sent:
@@ -482,14 +499,6 @@ class TradingEngine:
         self.telegram_notifier.notify_daily_summary(summary)
         
         # Auto-generate HTML performance dashboard
-        try:
-            web_path = self.config.get("system", {}).get("web_report_path")
-            reporter = ReportGenerator(web_export_path=web_path)
-            report_path = reporter.generate_html_report()
-            log.info(f"Updated HTML Performance Dashboard: {report_path}")
-        except Exception as e:
-            log.error(f"Error auto-generating HTML report: {e}")
-
-
+        self._export_live_web_report()
         self.eod_summary_sent = True
 

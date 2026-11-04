@@ -10,6 +10,8 @@ system:
   intraday_exit_time: "15:15"
   market_close_time: "15:30"
   stagnation_timeout_mins: 20 # Exit option if no favorable move in 20 mins (anti-theta)
+  candle_interval: "5m"       # "3m" or "5m" for fast options momentum (was 15m)
+  trade_cooldown_mins: 3      # Short cooldown before re-evaluating same symbol
   web_report_path: "/home/gravitywork/public_html/index.html" # Automatically update website!
 
 
