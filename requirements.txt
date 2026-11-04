@@ -1,6 +1,7 @@
 # GravityOptions Dependencies
 smartapi-python>=1.5.0
 logzero>=1.7.0
+websocket-client>=1.6.0
 pyotp>=2.9.0
 pyyaml>=6.0.0
 pandas>=2.0.0
