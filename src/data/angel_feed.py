@@ -118,6 +118,7 @@ class AngelOneFeed(BaseDataFeed):
         self._cached_ltp: Dict[str, float] = {}
         self._candle_cache: Dict[str, tuple] = {} # key -> (timestamp, List[Candle])
         self._last_api_call = 0.0
+        self.instrument_mgr = None
 
     def _rate_limit(self, delay: float = 0.35):
         """Enforces safe delay between API requests to respect Angel One rate limits."""
@@ -169,7 +170,16 @@ class AngelOneFeed(BaseDataFeed):
         if sym_key in KNOWN_TOKENS:
             tok, tradingsym, exch = KNOWN_TOKENS[sym_key]
             return tok, tradingsym, exch
-        
+
+        # Check InstrumentManager scrip cache for options / equities
+        if hasattr(self, "instrument_mgr") and self.instrument_mgr:
+            try:
+                item = self.instrument_mgr.lookup_symbol(sym_key)
+                if item:
+                    return str(item.get("token")), item.get("symbol"), item.get("exch_seg", default_exchange)
+            except Exception:
+                pass
+
         # If already a numeric token string
         if sym_key.isdigit():
             return sym_key, sym_key, default_exchange

@@ -129,6 +129,12 @@ class InstrumentManager:
         year_str = expiry.strftime("%y")
         return f"{symbol.upper()}{day_str}{month_str}{year_str}{strike_str}{option_type.upper()}"
 
+    def lookup_symbol(self, symbol: str) -> Optional[dict]:
+        """Look up instrument details from Angel One scrip master."""
+        if not self.instruments_by_symbol:
+            self.load_or_download_master()
+        return self.instruments_by_symbol.get(symbol.upper().strip())
+
     def load_or_download_master(self):
         """Cache Angel One Scrip Master JSON for resolving live token IDs."""
         os.makedirs(os.path.dirname(self.CACHE_FILE), exist_ok=True)

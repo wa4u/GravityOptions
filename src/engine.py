@@ -30,7 +30,7 @@ class TradingEngine:
         self.telegram_notifier = TelegramNotifier(telegram_file)
         
         # Core components
-        self.instrument_mgr = InstrumentManager()
+        self.instrument_mgr = InstrumentManager(auto_download_master=True)
         self.risk_mgr = RiskManager(self.config)
         
         sim_cfg = self.config.get("paper_simulation", {})
@@ -53,6 +53,8 @@ class TradingEngine:
         )
 
         self.feed: BaseDataFeed = self._init_data_feed()
+        if hasattr(self.feed, "instrument_mgr"):
+            self.feed.instrument_mgr = self.instrument_mgr
         self.running = False
         self.eod_summary_sent = False
         self.last_heartbeat_time = 0.0
@@ -91,10 +93,12 @@ class TradingEngine:
             if not pos:
                 continue
 
-            # Fetch or simulate current option market price
-            current_price = self.feed.get_ltp(contract)
+            # Fetch real option market price from Angel One NFO
+            current_price = self.feed.get_ltp(contract, exchange="NFO")
             if current_price <= 0:
-                # Estimate price from intrinsic + time value
+                current_price = self.feed.get_ltp(contract)
+            if current_price <= 0:
+                # Fallback only if broker feed is unreachable
                 current_price = round(pos.current_price * 1.002, 2)
             
             pos.current_price = current_price
@@ -205,12 +209,14 @@ class TradingEngine:
                     strike=contract_symbol
                 )
 
-                # Option entry price & sizing
-                estimated_premium = max(100.0, signal.spot_price * 0.008) # ~0.8% of spot for ATM
+                # Real option market price from Angel One NFO or estimated fallback
+                real_premium = self.feed.get_ltp(contract_symbol, exchange="NFO")
+                entry_premium = real_premium if real_premium > 0 else max(100.0, signal.spot_price * 0.008)
+
                 quantity, lots = self.risk_mgr.calculate_position_size(
                     symbol=symbol,
                     lot_size=cfg.get("lot_size", 25),
-                    entry_price=estimated_premium,
+                    entry_price=entry_premium,
                     broker_capital=self.broker.cash,
                     configured_lots=cfg.get("fixed_lots", 1)
                 )
@@ -223,7 +229,7 @@ class TradingEngine:
                     symbol=symbol,
                     option_type=signal.option_type,
                     strike=signal.target_strike,
-                    market_price=estimated_premium,
+                    market_price=entry_premium,
                     quantity=quantity,
                     lots=lots,
                     sl_pct=self.risk_mgr.default_sl_pct,
@@ -291,13 +297,15 @@ class TradingEngine:
                     strike=contract_symbol
                 )
 
-                estimated_premium = max(25.0, signal.spot_price * 0.02)
+                real_premium = self.feed.get_ltp(contract_symbol, exchange="NFO")
+                entry_premium = real_premium if real_premium > 0 else max(25.0, signal.spot_price * 0.02)
+
                 # Stock lot size approximation (approx 500-1000 shares per lot)
                 stock_lot_size = max(100, int(500000 / signal.spot_price))
                 quantity, lots = self.risk_mgr.calculate_position_size(
                     symbol=symbol,
                     lot_size=stock_lot_size,
-                    entry_price=estimated_premium,
+                    entry_price=entry_premium,
                     broker_capital=self.broker.cash,
                     configured_lots=stk_cfg.get("fixed_lots", 1)
                 )
@@ -307,7 +315,7 @@ class TradingEngine:
                     symbol=symbol,
                     option_type=signal.option_type,
                     strike=signal.target_strike,
-                    market_price=estimated_premium,
+                    market_price=entry_premium,
                     quantity=quantity,
                     lots=lots,
                     sl_pct=self.risk_mgr.default_sl_pct,
