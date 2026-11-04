@@ -54,7 +54,16 @@ class TelegramNotifier:
             log.error(f"Telegram error: {e}")
             return False
 
-    def notify_signal(self, symbol: str, direction: str, trigger_reason: str, spot: float, strike: str, display_name: str = ""):
+    def notify_signal(
+        self,
+        symbol: str,
+        direction: str,
+        trigger_reason: str,
+        spot: float,
+        strike: str,
+        display_name: str = "",
+        oi_info: Optional[Dict[str, Any]] = None
+    ):
         if not self.toggles.get("signal_detected", True):
             return
         emoji = "⚡"
@@ -62,6 +71,19 @@ class TelegramNotifier:
         safe_reason = html.escape(str(trigger_reason))
         display = display_name if display_name else strike
         sub = f" (<code>{strike}</code>)" if display != strike else ""
+
+        oi_line = ""
+        if oi_info and oi_info.get("is_valid"):
+            pcr = oi_info.get("pcr", 1.0)
+            sent = oi_info.get("sentiment", "NEUTRAL")
+            cw = oi_info.get("call_wall", 0.0)
+            pw = oi_info.get("put_wall", 0.0)
+            mp = oi_info.get("max_pain", 0.0)
+            oi_line = (
+                f"<b>📊 PCR Sentiment:</b> {pcr:.2f} ({sent})\n"
+                f"<b>🛡️ Put Wall:</b> ₹{pw:,.0f} | <b>🧱 Call Wall:</b> ₹{cw:,.0f} | <b>🎯 MaxPain:</b> ₹{mp:,.0f}\n"
+            )
+
         msg = (
             f"<b>{emoji} SIGNAL DETECTED</b> {color_dot}\n"
             f"━━━━━━━━━━━━━━━━━━\n"
@@ -69,6 +91,7 @@ class TelegramNotifier:
             f"<b>Direction:</b> {direction.upper()}\n"
             f"<b>Target Option:</b> <b>{display}</b>{sub}\n"
             f"<b>Spot Price:</b> ₹{spot:,.2f}\n"
+            f"{oi_line}"
             f"<b>Trigger Setup:</b> <i>{safe_reason}</i>\n"
             f"<i>Validating risk rules before execution...</i>"
         )
@@ -84,6 +107,14 @@ class TelegramNotifier:
         display = order.get("display_name") or order.get("contract_symbol")
         code = order.get("contract_symbol")
         sub = f" (<code>{code}</code>)" if display != code else ""
+
+        oi_info = order.get("oi_info")
+        oi_line = ""
+        if oi_info and oi_info.get("is_valid"):
+            pcr = oi_info.get("pcr", 1.0)
+            cw = oi_info.get("call_wall", 0.0)
+            pw = oi_info.get("put_wall", 0.0)
+            oi_line = f"<b>OI Confirmation:</b> PCR {pcr:.2f} | Put ₹{pw:,.0f} | Call ₹{cw:,.0f}\n"
         
         msg = (
             f"<b>{dot} OPTION BUY ENTRY EXECUTED</b>\n"
@@ -91,6 +122,7 @@ class TelegramNotifier:
             f"<b>Instrument:</b> <b>{display}</b>{sub}\n"
             f"<b>Underlying:</b> {order.get('symbol')} (Spot: ₹{order.get('spot_price', 0):,.2f})\n"
             f"<b>Type & Delta:</b> {opt_type} | Δ: {delta:+.2f}\n"
+            f"{oi_line}"
             f"<b>Fill Price:</b> ₹{order.get('entry_price', 0):.2f}\n"
             f"<b>Quantity / Lots:</b> {order.get('quantity')} ({order.get('lots', 1)} Lot)\n"
             f"<b>Stop Loss (SL):</b> ₹{order.get('stop_loss', 0):.2f} (-{order.get('sl_pct', 15):.1f}%)\n"

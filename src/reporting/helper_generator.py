@@ -527,8 +527,14 @@ class HelperPageGenerator:
 </body>
 </html>
 """
-        with open(self.output_path, "w", encoding="utf-8") as f:
-            f.write(html_content)
+        try:
+            with open(self.output_path, "w", encoding="utf-8") as f:
+                f.write(html_content)
+            log.info(f"🛠️ Helper Page exported to: {self.output_path}")
+        except PermissionError as pe:
+            log.warning(f"Permission denied writing local helper {self.output_path} (continuing to web export): {pe}")
+        except Exception as e:
+            log.warning(f"Could not write local helper {self.output_path}: {e}")
 
         if self.web_export_path:
             try:
@@ -539,5 +545,4 @@ class HelperPageGenerator:
             except Exception as e:
                 log.warning(f"Could not export helper page to web path: {e}")
 
-        log.info(f"🛠️ Helper Page exported to: {self.output_path}")
         return os.path.abspath(self.output_path)

@@ -209,6 +209,25 @@ class AngelOneFeed(BaseDataFeed):
 
         return self._cached_ltp.get(token, 0.0)
 
+    def get_market_data(self, mode: str, exchange_tokens: Dict[str, List[str]]) -> Dict:
+        """
+        Fetch batch market data (including Open Interest and volume) via SmartAPI getMarketData.
+        mode: 'FULL', 'OHLC', or 'LTP'
+        exchange_tokens: e.g. {'NFO': ['62185', '62186'], 'BFO': ['token1']}
+        """
+        if not self.is_connected or not self.smart_api:
+            return {}
+
+        try:
+            self._rate_limit(0.40)
+            resp = self.smart_api.getMarketData(mode, exchange_tokens)
+            if resp and resp.get("status") and resp.get("data"):
+                return resp["data"]
+        except Exception as e:
+            log.warning(f"Error fetching batch market data from SmartAPI: {e}")
+
+        return {}
+
     def get_historical_candles(
         self,
         symbol: str,

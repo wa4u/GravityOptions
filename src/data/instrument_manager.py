@@ -198,6 +198,78 @@ class InstrumentManager:
 
         return None
 
+    def get_option_chain_contracts(
+        self,
+        symbol: str,
+        spot_price: float,
+        num_strikes: int = 5,
+        current_date: date = None
+    ) -> Dict:
+        """
+        Dynamically finds the CE and PE contracts for ATM and surrounding strikes
+        for the nearest active expiry in a single fast pass.
+        """
+        if not self.instruments_by_symbol:
+            self.load_or_download_master()
+
+        if current_date is None:
+            current_date = date.today()
+
+        sym_upper = symbol.upper().strip()
+        step = self.get_strike_step(sym_upper)
+        atm_strike = self.calculate_atm_strike(sym_upper, spot_price)
+
+        strikes = [round(atm_strike + i * step, 1) for i in range(-num_strikes, num_strikes + 1)]
+        target_val_map = {round(float(s) * 100, 2): s for s in strikes}
+        target_exch = "BFO" if sym_upper == "SENSEX" else "NFO"
+
+        candidates = {}
+        for sym, item in self.instruments_by_symbol.items():
+            if (
+                item.get("name") == sym_upper
+                and item.get("exch_seg") == target_exch
+                and item.get("instrumenttype") in ["OPTIDX", "OPTSTK"]
+            ):
+                try:
+                    s_val = round(float(item.get("strike", 0)), 2)
+                    if s_val in target_val_map:
+                        s = target_val_map[s_val]
+                        opt = "CE" if sym.endswith("CE") else ("PE" if sym.endswith("PE") else None)
+                        if opt:
+                            exp_str = item.get("expiry", "")
+                            exp_date = datetime.strptime(exp_str, "%d%b%Y").date()
+                            if exp_date >= current_date:
+                                candidates.setdefault((s, opt), []).append((exp_date, item))
+                except Exception:
+                    continue
+
+        chain_contracts = {}
+        tokens_by_exch = {target_exch: []}
+        active_expiry = None
+
+        for s in strikes:
+            chain_contracts[s] = {}
+            for opt in ["CE", "PE"]:
+                items = candidates.get((s, opt), [])
+                if items:
+                    items.sort(key=lambda x: x[0])
+                    nearest_exp, best_item = items[0]
+                    if active_expiry is None:
+                        active_expiry = nearest_exp
+                    chain_contracts[s][opt] = best_item
+                    tok = str(best_item.get("token"))
+                    if tok and tok not in tokens_by_exch[target_exch]:
+                        tokens_by_exch[target_exch].append(tok)
+
+        return {
+            "symbol": sym_upper,
+            "spot_price": spot_price,
+            "expiry": active_expiry,
+            "strikes": strikes,
+            "contracts": chain_contracts,
+            "tokens_by_exchange": tokens_by_exch
+        }
+
     def load_or_download_master(self):
         """Cache Angel One Scrip Master JSON for resolving live token IDs."""
         os.makedirs(os.path.dirname(self.CACHE_FILE), exist_ok=True)

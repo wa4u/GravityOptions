@@ -59,3 +59,7 @@ class BaseDataFeed(ABC):
     def get_ltp(self, token: str, exchange: str = "NSE") -> float:
         """Fetch latest single price."""
         pass
+
+    def get_market_data(self, mode: str, exchange_tokens: Dict[str, List[str]]) -> Dict:
+        """Fetch batch market data (including OI and volume)."""
+        return {}

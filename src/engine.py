@@ -14,6 +14,7 @@ from src.data.mock_replay_feed import MockReplayFeed
 from src.data.instrument_manager import InstrumentManager
 from src.screener.index_screener import IndexScreener, IndexSignal
 from src.screener.stock_screener import StockScreener, StockSignal
+from src.data.oi_analyzer import OIAnalyzer, OIAnalysisResult
 from src.risk.risk_manager import RiskManager
 from src.execution.paper_broker import PaperBroker, Position
 from src.alerts.telegram_notifier import TelegramNotifier
@@ -55,6 +56,10 @@ class TradingEngine:
         self.feed: BaseDataFeed = self._init_data_feed()
         if hasattr(self.feed, "instrument_mgr"):
             self.feed.instrument_mgr = self.instrument_mgr
+
+        oi_cache_ttl = self.config.get("oi_analysis", {}).get("cache_seconds", 60.0)
+        self.oi_analyzer = OIAnalyzer(self.feed, self.instrument_mgr, cache_ttl=oi_cache_ttl)
+
         self.running = False
         self.eod_summary_sent = False
         self.last_heartbeat_time = 0.0
@@ -213,6 +218,38 @@ class TradingEngine:
             )
 
             if signal:
+                # 1. Open Interest (OI) & PCR Sentiment Validation
+                oi_cfg = self.config.get("oi_analysis", {})
+                oi_info_dict = None
+                if oi_cfg.get("enabled", True):
+                    oi_res = self.oi_analyzer.analyze_symbol(
+                        symbol,
+                        signal.spot_price,
+                        num_strikes=oi_cfg.get("num_strikes_each_side", 5)
+                    )
+                    if oi_res and oi_res.is_valid:
+                        valid_oi, oi_rsn = self.oi_analyzer.validate_signal(
+                            direction=signal.direction,
+                            spot_price=signal.spot_price,
+                            oi_result=oi_res,
+                            min_pcr_call=oi_cfg.get("min_pcr_for_call", 0.90),
+                            max_pcr_put=oi_cfg.get("max_pcr_for_put", 1.15),
+                            min_wall_dist=oi_cfg.get("min_distance_to_wall", 25.0)
+                        )
+                        if not valid_oi:
+                            log.info(f"🛡️ [OI Filter] {symbol} {signal.direction} blocked: {oi_rsn}")
+                            continue
+
+                        log.info(f"✅ [OI Filter] {symbol} {signal.direction} confirmed: {oi_rsn}")
+                        oi_info_dict = {
+                            "is_valid": True,
+                            "pcr": oi_res.pcr,
+                            "sentiment": oi_res.sentiment,
+                            "call_wall": oi_res.call_wall,
+                            "put_wall": oi_res.put_wall,
+                            "max_pain": oi_res.max_pain
+                        }
+
                 opt_info = self.instrument_mgr.find_option_contract(symbol, signal.target_strike, signal.option_type)
                 if opt_info:
                     contract_symbol = opt_info["symbol"]
@@ -236,7 +273,8 @@ class TradingEngine:
                     trigger_reason=signal.trigger_reason,
                     spot=signal.spot_price,
                     strike=contract_symbol,
-                    display_name=display_name
+                    display_name=display_name,
+                    oi_info=oi_info_dict
                 )
 
                 t_years = time_to_expiry_in_years(expiry, now)
@@ -287,7 +325,8 @@ class TradingEngine:
                         "sl_pct": self.risk_mgr.default_sl_pct,
                         "target": pos.target,
                         "tp_pct": self.risk_mgr.default_tp_pct,
-                        "trading_mode": "INTRADAY"
+                        "trading_mode": "INTRADAY",
+                        "oi_info": oi_info_dict
                     }
                     self.telegram_notifier.notify_order_entry(order_info)
 
@@ -390,7 +429,8 @@ class TradingEngine:
                         "sl_pct": self.risk_mgr.default_sl_pct,
                         "target": pos.target,
                         "tp_pct": self.risk_mgr.default_tp_pct,
-                        "trading_mode": "INTRADAY"
+                        "trading_mode": "INTRADAY",
+                        "oi_info": oi_info_dict
                     }
                     self.telegram_notifier.notify_order_entry(order_info)
 
@@ -439,16 +479,27 @@ class TradingEngine:
         cash = summary.get("cash", 100000.0)
         pnl = summary.get("total_pnl", 0.0)
 
-        # Get spot quotes for enabled indices
+        # Get spot quotes and OI/PCR for enabled indices
         quotes = []
+        oi_status = {}
         indices_cfg = self.config.get("indices", {})
         for sym, cfg in indices_cfg.items():
             if cfg.get("enabled", False):
                 ltp = self.feed.get_ltp(sym, cfg.get("exchange", "NSE"))
+                oi_res = self.oi_analyzer._cache.get(sym.upper())
+                pcr_str = f" [PCR:{oi_res.pcr:.2f}]" if (oi_res and oi_res.is_valid) else ""
                 if ltp > 0:
-                    quotes.append(f"{sym}: ₹{ltp:,.2f}")
+                    quotes.append(f"{sym}: ₹{ltp:,.2f}{pcr_str}")
                 else:
-                    quotes.append(f"{sym}: Monitoring")
+                    quotes.append(f"{sym}: Monitoring{pcr_str}")
+                if oi_res and oi_res.is_valid:
+                    oi_status[sym.upper()] = {
+                        "pcr": oi_res.pcr,
+                        "sentiment": oi_res.sentiment,
+                        "call_wall": oi_res.call_wall,
+                        "put_wall": oi_res.put_wall,
+                        "max_pain": oi_res.max_pain
+                    }
 
         quote_line = " | ".join(quotes) if quotes else "Monitoring indices"
         log.info(f"💓 [{now_str} IST] Market Active | Cash: ₹{cash:,.0f} | Open: {pos_count}/3 | P&L: ₹{pnl:+,.2f} | {quote_line}")
@@ -469,6 +520,7 @@ class TradingEngine:
                 "unrealized_pnl": summary.get("unrealized_pnl", 0.0),
                 "total_pnl": pnl,
                 "quotes": quotes,
+                "oi_analytics": oi_status,
                 "positions": [
                     {
                         "contract": c_sym,
