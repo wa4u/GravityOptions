@@ -55,6 +55,7 @@ class TradingEngine:
         self.feed: BaseDataFeed = self._init_data_feed()
         self.running = False
         self.eod_summary_sent = False
+        self.last_heartbeat_time = 0.0
 
     def load_yaml(self, path: str) -> Dict:
         with open(path, "r") as f:
@@ -359,6 +360,69 @@ class TradingEngine:
         # 4. Scan for new entries
         self.scan_indices()
         self.scan_stocks()
+
+        # 5. Periodic Heartbeat Log (Every 60 seconds)
+        now_ts = time.time()
+        if now_ts - self.last_heartbeat_time >= 60.0:
+            self._log_heartbeat()
+            self.last_heartbeat_time = now_ts
+
+    def _log_heartbeat(self):
+        """Outputs periodic live market status to logs and persists data/live_status.json."""
+        now = get_now_ist()
+        now_str = now.strftime("%H:%M:%S")
+        pos_count = len(self.broker.positions)
+        summary = self.broker.get_portfolio_summary()
+        cash = summary.get("cash", 100000.0)
+        pnl = summary.get("total_pnl", 0.0)
+
+        # Get spot quotes for enabled indices
+        quotes = []
+        indices_cfg = self.config.get("indices", {})
+        for sym, cfg in indices_cfg.items():
+            if cfg.get("enabled", False):
+                ltp = self.feed.get_ltp(sym, cfg.get("exchange", "NSE"))
+                if ltp > 0:
+                    quotes.append(f"{sym}: ₹{ltp:,.2f}")
+                else:
+                    quotes.append(f"{sym}: Monitoring")
+
+        quote_line = " | ".join(quotes) if quotes else "Monitoring indices"
+        log.info(f"💓 [{now_str} IST] Market Active | Cash: ₹{cash:,.0f} | Open: {pos_count}/3 | P&L: ₹{pnl:+,.2f} | {quote_line}")
+
+        if pos_count > 0:
+            for c_sym, p in self.broker.positions.items():
+                pnl_pct = ((p.current_price - p.entry_price) / p.entry_price) * 100.0 if p.entry_price > 0 else 0.0
+                log.info(f"   ▶ {c_sym}: Entry ₹{p.entry_price:.2f} -> LTP ₹{p.current_price:.2f} ({pnl_pct:+.1f}%) | SL: ₹{p.stop_loss:.2f} | TP: ₹{p.target:.2f}")
+
+        # Persist status for check_status.py
+        try:
+            status_info = {
+                "timestamp": now.strftime("%Y-%m-%d %H:%M:%S IST"),
+                "status": "RUNNING",
+                "cash": cash,
+                "open_positions": pos_count,
+                "realized_pnl": summary.get("realized_pnl", 0.0),
+                "unrealized_pnl": summary.get("unrealized_pnl", 0.0),
+                "total_pnl": pnl,
+                "quotes": quotes,
+                "positions": [
+                    {
+                        "contract": c_sym,
+                        "entry_price": p.entry_price,
+                        "current_price": p.current_price,
+                        "quantity": p.quantity,
+                        "stop_loss": p.stop_loss,
+                        "target": p.target
+                    }
+                    for c_sym, p in self.broker.positions.items()
+                ]
+            }
+            os.makedirs("data", exist_ok=True)
+            with open("data/live_status.json", "w") as f:
+                json.dump(status_info, f, indent=2)
+        except Exception:
+            pass
 
     def generate_eod_summary(self):
         """Send End-of-Day summary."""
