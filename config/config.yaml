@@ -11,7 +11,7 @@ system:
   market_close_time: "15:30"
   stagnation_timeout_mins: 20 # Exit option if no favorable move in 20 mins (anti-theta)
   candle_interval: "5m"       # "3m" or "5m" for fast options momentum (was 15m)
-  trade_cooldown_mins: 3      # Short cooldown before re-evaluating same symbol
+  trade_cooldown_mins: 15     # 15m cooldown after trade exit to avoid chop re-entry
   web_report_path: "/home/gravitywork/public_html/index.html" # Automatically update website!
 
 
@@ -108,6 +108,8 @@ position_sizing:
 risk:
   max_daily_loss_inr: 5000.0 # Hard daily loss cutoff across all trades
   max_open_trades: 3         # Max concurrent active trades
+  max_daily_trades: 5        # Hard limit on total trades per day to prevent overtrading
+  max_trades_per_symbol: 2   # Max trades allowed on a single symbol per day
   stop_loss_pct: 15.0        # Default stop-loss on option premium (e.g., 15%)
   target_profit_pct: 35.0    # First target profit on option premium (e.g., 35%)
   trail_sl_trigger_pct: 15.0 # Move SL to breakeven once profit reaches 15%

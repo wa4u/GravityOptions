@@ -26,7 +26,7 @@ class IndexScreener:
         self.atr_period = atr_period
 
     def calculate_indicators(self, candles: List[Candle]) -> pd.DataFrame:
-        if len(candles) < 20:
+        if len(candles) < 5:
             return pd.DataFrame()
 
         df = pd.DataFrame([{
@@ -45,18 +45,34 @@ class IndexScreener:
         df["ema_fast"] = df["close"].ewm(span=self.ema_fast, adjust=False).mean()
         df["ema_slow"] = df["close"].ewm(span=self.ema_slow, adjust=False).mean()
 
-        # Cumulative VWAP
+        # Intraday VWAP: Calculate strictly on today's session (or latest day in dataset)
+        df["date_only"] = df["timestamp"].apply(lambda x: x.date() if hasattr(x, "date") else x)
+        latest_date = df["date_only"].iloc[-1]
+        today_mask = df["date_only"] == latest_date
+
         typical_price = (df["high"] + df["low"] + df["close"]) / 3.0
-        df["cum_vol"] = df["volume"].cumsum()
-        df["cum_pv"] = (typical_price * df["volume"]).cumsum()
-        df["vwap"] = df["cum_pv"] / df["cum_vol"].replace(0, np.nan)
+        df["vwap"] = typical_price # Default baseline
+
+        today_indices = df[today_mask].index
+        today_vol = df.loc[today_indices, "volume"]
+        today_tp = typical_price.loc[today_indices]
+
+        if today_vol.sum() > 0:
+            cum_vol = today_vol.cumsum()
+            cum_pv = (today_tp * today_vol).cumsum()
+            df.loc[today_indices, "vwap"] = cum_pv / cum_vol.replace(0, np.nan)
+        else:
+            # Fallback for cash index with 0 reported volume: expanding typical price mean
+            df.loc[today_indices, "vwap"] = today_tp.expanding().mean()
+
+        df["vwap"] = df["vwap"].ffill().bfill()
 
         # Average True Range (ATR)
         high_low = df["high"] - df["low"]
         high_prev_close = (df["high"] - df["close"].shift(1)).abs()
         low_prev_close = (df["low"] - df["close"].shift(1)).abs()
         true_range = pd.concat([high_low, high_prev_close, low_prev_close], axis=1).max(axis=1)
-        df["atr"] = true_range.rolling(self.atr_period).mean()
+        df["atr"] = true_range.rolling(min(self.atr_period, len(df))).mean()
 
         return df
 
@@ -67,32 +83,43 @@ class IndexScreener:
         strike_step: int = 50
     ) -> Optional[IndexSignal]:
         """
-        Check for 15-minute Opening Range Breakout with VWAP and EMA confirmation.
+        Check for 15-minute Opening Range Breakout strictly using TODAY's opening range
+        with VWAP and EMA confirmation.
         """
         df = self.calculate_indicators(candles)
         if df.empty or len(df) < 5:
             return None
 
-        last_row = df.iloc[-1]
-        prev_row = df.iloc[-2]
+        # Filter strictly for today's session
+        latest_date = df["date_only"].iloc[-1]
+        today_df = df[df["date_only"] == latest_date].copy()
 
-        # Morning Opening Range: First 15-minute range (first 3 bars of 5m or 2 bars of 15m)
-        orb_bars = 3 if len(df) >= 6 else 2
-        orb_high = df.iloc[0:orb_bars]["high"].max()
-        orb_low = df.iloc[0:orb_bars]["low"].min()
+        # Must have completed the 15-minute opening range (3 x 5m bars) plus at least 1 active bar
+        if len(today_df) < 4:
+            return None
+
+        # Morning Opening Range: First 3 bars of 5m (09:15 - 09:30 IST)
+        orb_bars = today_df.iloc[0:3]
+        orb_high = orb_bars["high"].max()
+        orb_low = orb_bars["low"].min()
+
+        last_row = today_df.iloc[-1]
+        prev_row = today_df.iloc[-2]
 
         current_close = last_row["close"]
+        current_open = last_row["open"]
+        prev_close = prev_row["close"]
         vwap = last_row["vwap"]
         ema_f = last_row["ema_fast"]
         ema_s = last_row["ema_slow"]
 
-        # Bullish Breakout: Price crosses above ORB High, above VWAP, EMA fast > slow
-        if (current_close > orb_high and prev_row["close"] <= orb_high and 
-            current_close > vwap and ema_f > ema_s):
+        # Bullish Breakout: Decisive green candle closing above today's ORB High, above VWAP, EMA Bullish
+        if (current_close > orb_high and prev_close <= orb_high and 
+            current_close > current_open and current_close > vwap and ema_f > ema_s):
             
             # Select ATM / slightly ITM Call
             atm_strike = round(round(current_close / strike_step) * strike_step, 1)
-            reason = f"Bullish Breakout: Broke ORB High ₹{orb_high:.1f} | Close > VWAP ₹{vwap:.1f} | EMA Bullish"
+            reason = f"Bullish Breakout: Broke Today's ORB High ₹{orb_high:.1f} | Close > VWAP ₹{vwap:.1f} | EMA Bullish"
             return IndexSignal(
                 symbol=symbol,
                 direction="BUY_CALL",
@@ -103,13 +130,13 @@ class IndexScreener:
                 delta_estimate=0.55
             )
 
-        # Bearish Breakdown: Price crosses below ORB Low, below VWAP, EMA fast < slow
-        elif (current_close < orb_low and prev_row["close"] >= orb_low and 
-              current_close < vwap and ema_f < ema_s):
+        # Bearish Breakdown: Decisive red candle closing below today's ORB Low, below VWAP, EMA Bearish
+        elif (current_close < orb_low and prev_close >= orb_low and 
+              current_close < current_open and current_close < vwap and ema_f < ema_s):
             
             # Select ATM / slightly ITM Put
             atm_strike = round(round(current_close / strike_step) * strike_step, 1)
-            reason = f"Bearish Breakdown: Broke ORB Low ₹{orb_low:.1f} | Close < VWAP ₹{vwap:.1f} | EMA Bearish"
+            reason = f"Bearish Breakdown: Broke Today's ORB Low ₹{orb_low:.1f} | Close < VWAP ₹{vwap:.1f} | EMA Bearish"
             return IndexSignal(
                 symbol=symbol,
                 direction="BUY_PUT",

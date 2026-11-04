@@ -488,10 +488,14 @@ class ReportGenerator:
 </body>
 </html>
 """
-        with open(self.output_path, "w", encoding="utf-8") as f:
-            f.write(html_content)
-
-        log.info(f"📊 Performance Dashboard successfully exported to: {self.output_path}")
+        try:
+            with open(self.output_path, "w", encoding="utf-8") as f:
+                f.write(html_content)
+            log.info(f"📊 Performance Dashboard successfully exported to: {self.output_path}")
+        except PermissionError as pe:
+            log.warning(f"Permission denied writing local report {self.output_path} (continuing to web export): {pe}")
+        except Exception as e:
+            log.warning(f"Could not write local report {self.output_path}: {e}")
 
         # If a web export path (e.g., /home/gravitywork/public_html/index.html) is provided
         if self.web_export_path:

@@ -27,6 +27,7 @@ class Position:
     trailing_level: int = 0
     is_open: bool = True
     display_name: str = ""
+    exchange: str = "NFO"
 
 @dataclass
 class TradeRecord:
@@ -129,7 +130,8 @@ class PaperBroker:
         tp_pct: float = 35.0,
         delta: float = 0.5,
         trading_mode: str = "INTRADAY",
-        display_name: str = ""
+        display_name: str = "",
+        exchange: str = "NFO"
     ) -> Optional[Position]:
         """Execute a simulated market buy order with slippage."""
         # Add slippage to entry price
@@ -166,7 +168,8 @@ class PaperBroker:
             delta=delta,
             trading_mode=trading_mode,
             highest_price=fill_price,
-            display_name=display_name if display_name else contract_symbol
+            display_name=display_name if display_name else contract_symbol,
+            exchange=exchange
         )
 
         self.positions[contract_symbol] = position

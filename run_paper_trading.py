@@ -14,9 +14,11 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 import time
+import signal
 from datetime import datetime
 from src.utils.logger import log
 from src.utils.time_utils import get_now_ist, is_market_open
+from src.utils.process_lock import SingleInstanceLock
 from src.engine import TradingEngine
 
 def main():
@@ -25,10 +27,37 @@ def main():
     print("   Paper Trading & Real-time Telegram Alerting")
     print("=" * 60)
 
+    # Acquire PID lock to guarantee only ONE instance runs
+    lock = SingleInstanceLock(pid_file=os.path.join(base_dir, "data", "bot.pid"))
+    if not lock.acquire():
+        msg = "FATAL: Another instance of GravityOptions is already running! Exiting immediately to prevent conflict."
+        log.error(msg)
+        print(f"\n[ERROR] {msg}\n")
+        sys.exit(0)
+
+    engine = None
+
+    def handle_shutdown(signum, frame):
+        log.warning(f"Termination signal ({signum}) received. Generating final report and shutting down...")
+        if engine:
+            try:
+                engine.generate_eod_summary()
+                engine.feed.disconnect()
+            except Exception:
+                pass
+        lock.release()
+        log.info("Shutdown complete.")
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, handle_shutdown)
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, handle_shutdown)
+
     try:
         engine = TradingEngine(config_file="config/config.yaml", telegram_file="config/telegram_config.yaml")
     except Exception as e:
         log.critical(f"Failed to initialize Trading Engine: {e}")
+        lock.release()
         sys.exit(1)
 
     log.info("System initialized. Starting market monitor...")

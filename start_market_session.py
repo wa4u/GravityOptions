@@ -26,18 +26,35 @@ def is_trading_session_now() -> bool:
     
     return session_start <= current_time <= session_end
 
-def is_bot_already_running() -> bool:
-    """Check if run_paper_trading.py is already active."""
+def is_bot_already_running(base_dir: str) -> bool:
+    """Check if run_paper_trading.py is already active via PID file or process list."""
+    pid_file = os.path.join(base_dir, "data", "bot.pid")
+    if os.path.exists(pid_file):
+        try:
+            with open(pid_file, "r") as f:
+                content = f.read().strip()
+            if content:
+                pid = int(content)
+                if os.name != "nt":
+                    os.kill(pid, 0)
+                    return True
+                else:
+                    return True
+        except (OSError, ValueError):
+            pass
+
+    # Secondary check: running processes via pgrep or ps
     try:
-        # Check running processes
         output = subprocess.check_output(["pgrep", "-f", "run_paper_trading.py"]).decode().strip()
-        return len(output) > 0
-    except subprocess.CalledProcessError:
-        return False
+        pids = [p for p in output.split() if int(p) != os.getpid()]
+        return len(pids) > 0
     except Exception:
-        return False
+        pass
+
+    return False
 
 def main():
+    base_dir = os.path.dirname(os.path.abspath(__file__))
     now_ist = datetime.now(IST)
     now_str = now_ist.strftime("%Y-%m-%d %H:%M:%S %Z")
 
@@ -45,8 +62,8 @@ def main():
         print(f"[{now_str}] Market is CLOSED. Sleeping...")
         sys.exit(0)
 
-    if is_bot_already_running():
-        print(f"[{now_str}] GravityOptions is already active and running. No action needed.")
+    if is_bot_already_running(base_dir):
+        print(f"[{now_str}] GravityOptions is already active and running (PID lock active). No action needed.")
         sys.exit(0)
 
     print(f"[{now_str}] 🚀 Indian Market session active! Launching GravityOptions background runner...")

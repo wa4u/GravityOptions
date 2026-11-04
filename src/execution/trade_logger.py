@@ -106,3 +106,17 @@ class TradeLogger:
             cursor.execute("SELECT * FROM trades ORDER BY exit_time DESC")
             rows = cursor.fetchall()
             return [dict(row) for row in rows]
+
+    def fetch_today_trades(self, target_date: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Fetch trades closed on the specified date (YYYY-MM-DD), defaulting to today."""
+        if not target_date:
+            target_date = datetime.now().strftime("%Y-%m-%d")
+        with self._get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM trades WHERE exit_time LIKE ? ORDER BY exit_time DESC",
+                (f"{target_date}%",)
+            )
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]

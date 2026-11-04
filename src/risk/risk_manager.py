@@ -21,6 +21,8 @@ class RiskManager:
         
         self.max_daily_loss = self.risk_cfg.get("max_daily_loss_inr", 5000.0)
         self.max_open_trades = self.risk_cfg.get("max_open_trades", 3)
+        self.max_daily_trades = self.risk_cfg.get("max_daily_trades", 5)
+        self.max_trades_per_symbol = self.risk_cfg.get("max_trades_per_symbol", 2)
         self.default_sl_pct = self.risk_cfg.get("stop_loss_pct", 15.0)
         self.default_tp_pct = self.risk_cfg.get("target_profit_pct", 35.0)
         self.trail_trigger_pct = self.risk_cfg.get("trail_sl_trigger_pct", 15.0)
@@ -48,14 +50,42 @@ class RiskManager:
 
         return False, ""
 
-    def can_open_new_trade(self, broker: PaperBroker) -> Tuple[bool, str]:
-        """Check if broker can open another position."""
+    def can_open_new_trade(self, broker: PaperBroker, symbol: Optional[str] = None) -> Tuple[bool, str]:
+        """Check if broker can open another position, enforcing hard risk limits."""
+        # 1. Circuit breaker check
         broken, reason = self.check_circuit_breaker(broker)
         if broken:
             return False, f"Trading halted: {reason}"
 
+        # 2. Concurrent position limit
         if len(broker.positions) >= self.max_open_trades:
             return False, f"Max concurrent trades ({self.max_open_trades}) reached"
+
+        # 3. Daily frequency and symbol limits
+        try:
+            today_str = get_now_ist().strftime("%Y-%m-%d")
+            today_trades = broker.logger.fetch_today_trades(today_str)
+
+            if len(today_trades) >= self.max_daily_trades:
+                return False, f"Daily trade limit reached ({len(today_trades)}/{self.max_daily_trades})"
+
+            if symbol:
+                sym_upper = symbol.upper().strip()
+                sym_trades = [t for t in today_trades if t.get("symbol", "").upper().strip() == sym_upper]
+                if len(sym_trades) >= self.max_trades_per_symbol:
+                    return False, f"Daily limit for {sym_upper} reached ({len(sym_trades)}/{self.max_trades_per_symbol})"
+
+                # Halt symbol if 2 consecutive losses today
+                consecutive_losses = 0
+                for t in sym_trades:
+                    if float(t.get("net_pnl", 0)) < 0:
+                        consecutive_losses += 1
+                    else:
+                        break
+                if consecutive_losses >= 2:
+                    return False, f"{sym_upper} halted for today after {consecutive_losses} consecutive losses"
+        except Exception as e:
+            log.warning(f"Error checking daily trade limits: {e}")
 
         return True, "OK"
 

@@ -61,7 +61,7 @@ class TradingEngine:
         self.circuit_breaker_triggered = False
         self.cooldowns: Dict[str, datetime] = {}
         self.candle_interval = self.config.get("system", {}).get("candle_interval", "5m")
-        self.cooldown_mins = self.config.get("system", {}).get("trade_cooldown_mins", 3)
+        self.cooldown_mins = self.config.get("system", {}).get("trade_cooldown_mins", 15)
 
     def load_yaml(self, path: str) -> Dict:
         with open(path, "r") as f:
@@ -97,18 +97,17 @@ class TradingEngine:
             if not pos:
                 continue
 
-            # Fetch real option market price from Angel One NFO
-            current_price = self.feed.get_ltp(contract, exchange="NFO")
+            # Fetch real option market price from Angel One using matching exchange segment
+            exch = getattr(pos, "exchange", "BFO" if pos.symbol.upper() == "SENSEX" else "NFO")
+            current_price = self.feed.get_ltp(contract, exchange=exch)
             if current_price <= 0:
                 current_price = self.feed.get_ltp(contract)
+            
+            # CRITICAL: If LTP is temporarily unavailable (rate-limit / exchange glitch),
+            # RETAIN last known valid price. NEVER use fallback theoretical pricing during monitoring,
+            # which causes false instant stop-loss exits!
             if current_price <= 0:
-                # Calculate realistic Black-Scholes price derived from live spot movement
-                spot_price = self.feed.get_ltp(pos.symbol)
-                if spot_price > 0:
-                    t_years = max(0.001, (5.0 / 365.0))
-                    current_price = black_scholes_price(spot_price, pos.strike, t_years, iv=0.15, option_type=pos.option_type)
-                else:
-                    current_price = pos.current_price
+                current_price = pos.current_price
             
             pos.current_price = current_price
             if current_price > pos.highest_price:
@@ -199,9 +198,9 @@ class TradingEngine:
             if symbol in self.cooldowns and now < self.cooldowns[symbol]:
                 continue
 
-            can_trade, reason = self.risk_mgr.can_open_new_trade(self.broker)
+            can_trade, reason = self.risk_mgr.can_open_new_trade(self.broker, symbol=symbol)
             if not can_trade:
-                break
+                continue
 
             candles = self.feed.get_historical_candles(symbol, symbol, interval=self.candle_interval, count=40)
             if not candles:
@@ -269,7 +268,8 @@ class TradingEngine:
                     tp_pct=self.risk_mgr.default_tp_pct,
                     delta=greeks["delta"],
                     trading_mode="INTRADAY",
-                    display_name=display_name
+                    display_name=display_name,
+                    exchange=exch_seg
                 )
 
                 if pos:
@@ -303,9 +303,9 @@ class TradingEngine:
             if symbol in self.cooldowns and now < self.cooldowns[symbol]:
                 continue
 
-            can_trade, reason = self.risk_mgr.can_open_new_trade(self.broker)
+            can_trade, reason = self.risk_mgr.can_open_new_trade(self.broker, symbol=symbol)
             if not can_trade:
-                break
+                continue
 
             candles = self.feed.get_historical_candles(symbol, symbol, interval=self.candle_interval, count=40)
             if not candles:
@@ -371,7 +371,8 @@ class TradingEngine:
                     tp_pct=self.risk_mgr.default_tp_pct,
                     delta=0.55 if signal.option_type == "CE" else -0.55,
                     trading_mode="INTRADAY",
-                    display_name=display_name
+                    display_name=display_name,
+                    exchange="NFO"
                 )
 
                 if pos:
