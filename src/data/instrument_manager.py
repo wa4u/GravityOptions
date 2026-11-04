@@ -135,6 +135,52 @@ class InstrumentManager:
             self.load_or_download_master()
         return self.instruments_by_symbol.get(symbol.upper().strip())
 
+    def find_option_contract(
+        self,
+        symbol: str,
+        strike: float,
+        option_type: str,
+        current_date: date = None
+    ) -> Optional[dict]:
+        """
+        Dynamically find the nearest active exchange option contract
+        for indices (OPTIDX) or stocks (OPTSTK) directly from Angel One master scrip.
+        """
+        if not self.instruments_by_symbol:
+            self.load_or_download_master()
+
+        if current_date is None:
+            current_date = date.today()
+
+        sym_upper = symbol.upper().strip()
+        opt_upper = option_type.upper().strip()
+        target_strike_val = round(float(strike) * 100, 2)
+
+        candidates = []
+        for sym, item in self.instruments_by_symbol.items():
+            if (
+                item.get("name") == sym_upper
+                and item.get("exch_seg") == "NFO"
+                and item.get("instrumenttype") in ["OPTIDX", "OPTSTK"]
+                and sym.endswith(opt_upper)
+            ):
+                try:
+                    item_strike = round(float(item.get("strike", 0)), 2)
+                    if abs(item_strike - target_strike_val) < 1.0:
+                        exp_str = item.get("expiry", "")
+                        exp_date = datetime.strptime(exp_str, "%d%b%Y").date()
+                        if exp_date >= current_date:
+                            candidates.append((exp_date, item))
+                except Exception:
+                    continue
+
+        if candidates:
+            # Sort chronologically by expiry date to pick the nearest active expiry
+            candidates.sort(key=lambda x: x[0])
+            return candidates[0][1]
+
+        return None
+
     def load_or_download_master(self):
         """Cache Angel One Scrip Master JSON for resolving live token IDs."""
         os.makedirs(os.path.dirname(self.CACHE_FILE), exist_ok=True)

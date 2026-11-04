@@ -198,10 +198,17 @@ class TradingEngine:
 
             if signal:
                 now = get_now_ist()
-                expiry = self.instrument_mgr.get_next_expiry(symbol, now.date())
-                contract_symbol = self.instrument_mgr.format_contract_symbol(
-                    symbol, expiry, signal.target_strike, signal.option_type
-                )
+                opt_info = self.instrument_mgr.find_option_contract(symbol, signal.target_strike, signal.option_type)
+                if opt_info:
+                    contract_symbol = opt_info["symbol"]
+                    lot_size = int(opt_info.get("lotsize", cfg.get("lot_size", 25)))
+                    expiry = datetime.strptime(opt_info.get("expiry"), "%d%b%Y").date()
+                else:
+                    expiry = self.instrument_mgr.get_next_expiry(symbol, now.date())
+                    contract_symbol = self.instrument_mgr.format_contract_symbol(
+                        symbol, expiry, signal.target_strike, signal.option_type
+                    )
+                    lot_size = cfg.get("lot_size", 25)
 
                 if contract_symbol in self.broker.positions:
                     continue # Already in this trade
@@ -220,7 +227,7 @@ class TradingEngine:
 
                 quantity, lots = self.risk_mgr.calculate_position_size(
                     symbol=symbol,
-                    lot_size=cfg.get("lot_size", 25),
+                    lot_size=lot_size,
                     entry_price=entry_premium,
                     broker_capital=self.broker.cash,
                     configured_lots=cfg.get("fixed_lots", 1)
@@ -286,10 +293,17 @@ class TradingEngine:
 
             if signal:
                 now = get_now_ist()
-                expiry = self.instrument_mgr.get_next_expiry(symbol, now.date())
-                contract_symbol = self.instrument_mgr.format_contract_symbol(
-                    symbol, expiry, signal.target_strike, signal.option_type
-                )
+                opt_info = self.instrument_mgr.find_option_contract(symbol, signal.target_strike, signal.option_type)
+                if opt_info:
+                    contract_symbol = opt_info["symbol"]
+                    stock_lot_size = int(opt_info.get("lotsize", 500))
+                    expiry = datetime.strptime(opt_info.get("expiry"), "%d%b%Y").date()
+                else:
+                    expiry = self.instrument_mgr.get_next_expiry(symbol, now.date())
+                    contract_symbol = self.instrument_mgr.format_contract_symbol(
+                        symbol, expiry, signal.target_strike, signal.option_type
+                    )
+                    stock_lot_size = max(100, int(500000 / signal.spot_price))
 
                 if contract_symbol in self.broker.positions:
                     continue
@@ -305,8 +319,6 @@ class TradingEngine:
                 real_premium = self.feed.get_ltp(contract_symbol, exchange="NFO")
                 entry_premium = real_premium if real_premium > 0 else max(25.0, signal.spot_price * 0.02)
 
-                # Stock lot size approximation (approx 500-1000 shares per lot)
-                stock_lot_size = max(100, int(500000 / signal.spot_price))
                 quantity, lots = self.risk_mgr.calculate_position_size(
                     symbol=symbol,
                     lot_size=stock_lot_size,
