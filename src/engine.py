@@ -4,7 +4,7 @@ from typing import Dict, Any, List, Optional
 import time
 
 from src.utils.logger import log
-from src.utils.greeks import calculate_greeks, implied_volatility
+from src.utils.greeks import calculate_greeks, implied_volatility, black_scholes_price
 from src.utils.time_utils import (
     get_now_ist, is_market_open, is_intraday_exit_time, time_to_expiry_in_years
 )
@@ -98,8 +98,13 @@ class TradingEngine:
             if current_price <= 0:
                 current_price = self.feed.get_ltp(contract)
             if current_price <= 0:
-                # Fallback only if broker feed is unreachable
-                current_price = round(pos.current_price * 1.002, 2)
+                # Calculate realistic Black-Scholes price derived from live spot movement
+                spot_price = self.feed.get_ltp(pos.symbol)
+                if spot_price > 0:
+                    t_years = max(0.001, (5.0 / 365.0))
+                    current_price = black_scholes_price(spot_price, pos.strike, t_years, iv=0.15, option_type=pos.option_type)
+                else:
+                    current_price = pos.current_price
             
             pos.current_price = current_price
             if current_price > pos.highest_price:

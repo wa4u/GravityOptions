@@ -57,6 +57,32 @@ def calculate_greeks(
         "iv": round(iv, 4)
     }
 
+def black_scholes_price(
+    spot: float,
+    strike: float,
+    time_to_expiry_years: float,
+    iv: float = 0.15,
+    interest_rate: float = 0.07,
+    option_type: str = "CE"
+) -> float:
+    """Calculate theoretical Black-Scholes option premium."""
+    if spot <= 0 or strike <= 0:
+        return 0.05
+    T = max(time_to_expiry_years, 0.0001)
+    sigma = max(iv, 0.01)
+    r = interest_rate
+    sqrt_T = math.sqrt(T)
+
+    d1 = (math.log(spot / strike) + (r + 0.5 * sigma ** 2) * T) / (sigma * sqrt_T)
+    d2 = d1 - sigma * sqrt_T
+
+    if option_type.upper() == "CE":
+        price = spot * norm_cdf(d1) - strike * math.exp(-r * T) * norm_cdf(d2)
+    else:
+        price = strike * math.exp(-r * T) * norm_cdf(-d2) - spot * norm_cdf(-d1)
+
+    return max(0.05, round(price, 2))
+
 def implied_volatility(
     price: float,
     spot: float,
