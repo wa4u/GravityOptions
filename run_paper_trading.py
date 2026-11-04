@@ -4,11 +4,16 @@ GravityOptions - Live Paper Trading Runner
 Executes real-time options buying automation for Indian Indices and Stocks.
 """
 import sys
+import os
+
+base_dir = os.path.dirname(os.path.abspath(__file__))
+if base_dir:
+    os.chdir(base_dir)
+
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 import time
-
 from datetime import datetime
 from src.utils.logger import log
 from src.utils.time_utils import get_now_ist, is_market_open

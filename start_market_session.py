@@ -59,7 +59,7 @@ def main():
     runner_script = os.path.join(base_dir, "run_paper_trading.py")
     log_file = os.path.join(base_dir, "trading.log")
 
-    cmd = f"nohup {venv_python} {runner_script} >> {log_file} 2>&1 &"
+    cmd = f"cd {base_dir} && nohup {venv_python} {runner_script} >> {log_file} 2>&1 &"
     os.system(cmd)
     print(f"[{now_str}] Started successfully! Logging to {log_file}")
 
