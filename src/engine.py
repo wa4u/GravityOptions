@@ -139,7 +139,7 @@ class TradingEngine:
             new_sl = self.risk_mgr.evaluate_trailing_stop(pos, current_price)
             if new_sl:
                 gain_pct = ((current_price - pos.entry_price) / pos.entry_price) * 100.0
-                self.telegram_notifier.notify_trailing_sl(contract, old_sl, new_sl, current_price, gain_pct)
+                self.telegram_notifier.notify_trailing_sl(contract, old_sl, new_sl, current_price, gain_pct, display_name=pos.display_name)
 
             # 4. Check Stagnation (Anti-Theta)
             if self.risk_mgr.check_stagnation(pos, now):
@@ -217,6 +217,7 @@ class TradingEngine:
                 opt_info = self.instrument_mgr.find_option_contract(symbol, signal.target_strike, signal.option_type)
                 if opt_info:
                     contract_symbol = opt_info["symbol"]
+                    display_name = opt_info.get("display_name", contract_symbol)
                     lot_size = int(opt_info.get("lotsize", cfg.get("lot_size", 25)))
                     expiry = datetime.strptime(opt_info.get("expiry"), "%d%b%Y").date()
                 else:
@@ -224,6 +225,7 @@ class TradingEngine:
                     contract_symbol = self.instrument_mgr.format_contract_symbol(
                         symbol, expiry, signal.target_strike, signal.option_type
                     )
+                    display_name = contract_symbol
                     lot_size = cfg.get("lot_size", 25)
 
                 if contract_symbol in self.broker.positions:
@@ -234,7 +236,8 @@ class TradingEngine:
                     direction=signal.direction,
                     trigger_reason=signal.trigger_reason,
                     spot=signal.spot_price,
-                    strike=contract_symbol
+                    strike=contract_symbol,
+                    display_name=display_name
                 )
 
                 t_years = time_to_expiry_in_years(expiry, now)
@@ -265,12 +268,14 @@ class TradingEngine:
                     sl_pct=self.risk_mgr.default_sl_pct,
                     tp_pct=self.risk_mgr.default_tp_pct,
                     delta=greeks["delta"],
-                    trading_mode="INTRADAY"
+                    trading_mode="INTRADAY",
+                    display_name=display_name
                 )
 
                 if pos:
                     order_info = {
                         "contract_symbol": contract_symbol,
+                        "display_name": display_name,
                         "symbol": symbol,
                         "spot_price": signal.spot_price,
                         "option_type": signal.option_type,
@@ -317,6 +322,7 @@ class TradingEngine:
                 opt_info = self.instrument_mgr.find_option_contract(symbol, signal.target_strike, signal.option_type)
                 if opt_info:
                     contract_symbol = opt_info["symbol"]
+                    display_name = opt_info.get("display_name", contract_symbol)
                     stock_lot_size = int(opt_info.get("lotsize", 500))
                     expiry = datetime.strptime(opt_info.get("expiry"), "%d%b%Y").date()
                 else:
@@ -324,6 +330,7 @@ class TradingEngine:
                     contract_symbol = self.instrument_mgr.format_contract_symbol(
                         symbol, expiry, signal.target_strike, signal.option_type
                     )
+                    display_name = contract_symbol
                     stock_lot_size = max(100, int(500000 / signal.spot_price))
 
                 if contract_symbol in self.broker.positions:
@@ -334,7 +341,8 @@ class TradingEngine:
                     direction=signal.direction,
                     trigger_reason=signal.trigger_reason,
                     spot=signal.spot_price,
-                    strike=contract_symbol
+                    strike=contract_symbol,
+                    display_name=display_name
                 )
 
                 t_years = time_to_expiry_in_years(expiry, now)
@@ -362,12 +370,14 @@ class TradingEngine:
                     sl_pct=self.risk_mgr.default_sl_pct,
                     tp_pct=self.risk_mgr.default_tp_pct,
                     delta=0.55 if signal.option_type == "CE" else -0.55,
-                    trading_mode="INTRADAY"
+                    trading_mode="INTRADAY",
+                    display_name=display_name
                 )
 
                 if pos:
                     order_info = {
                         "contract_symbol": contract_symbol,
+                        "display_name": display_name,
                         "symbol": symbol,
                         "spot_price": signal.spot_price,
                         "option_type": signal.option_type,

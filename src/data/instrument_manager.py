@@ -135,6 +135,16 @@ class InstrumentManager:
             self.load_or_download_master()
         return self.instruments_by_symbol.get(symbol.upper().strip())
 
+    def format_display_name(self, symbol_name: str, expiry_str: str, strike: float, opt_type: str) -> str:
+        """Format human-readable title matching broker UI: e.g. SENSEX 05 Nov 2026 77000 CE."""
+        try:
+            dt = datetime.strptime(expiry_str, "%d%b%Y")
+            exp_formatted = dt.strftime("%d %b %Y")
+        except Exception:
+            exp_formatted = expiry_str
+        strike_int = int(strike) if int(strike) == strike else strike
+        return f"{symbol_name} {exp_formatted} {strike_int} {opt_type.upper()}"
+
     def find_option_contract(
         self,
         symbol: str,
@@ -177,7 +187,14 @@ class InstrumentManager:
         if candidates:
             # Sort chronologically by expiry date to pick the nearest active expiry
             candidates.sort(key=lambda x: x[0])
-            return candidates[0][1]
+            best = dict(candidates[0][1])
+            best["display_name"] = self.format_display_name(
+                best.get("name", sym_upper),
+                best.get("expiry", ""),
+                strike,
+                opt_upper
+            )
+            return best
 
         return None
 

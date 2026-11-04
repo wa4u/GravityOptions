@@ -54,18 +54,20 @@ class TelegramNotifier:
             log.error(f"Telegram error: {e}")
             return False
 
-    def notify_signal(self, symbol: str, direction: str, trigger_reason: str, spot: float, strike: str):
+    def notify_signal(self, symbol: str, direction: str, trigger_reason: str, spot: float, strike: str, display_name: str = ""):
         if not self.toggles.get("signal_detected", True):
             return
         emoji = "⚡"
         color_dot = "🟢" if direction.upper() in ["BUY", "CALL", "CE"] else "🔴"
         safe_reason = html.escape(str(trigger_reason))
+        display = display_name if display_name else strike
+        sub = f" (<code>{strike}</code>)" if display != strike else ""
         msg = (
             f"<b>{emoji} SIGNAL DETECTED</b> {color_dot}\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"<b>Underlying:</b> <code>{symbol}</code>\n"
             f"<b>Direction:</b> {direction.upper()}\n"
-            f"<b>Target Option:</b> <code>{strike}</code>\n"
+            f"<b>Target Option:</b> <b>{display}</b>{sub}\n"
             f"<b>Spot Price:</b> ₹{spot:,.2f}\n"
             f"<b>Trigger Setup:</b> <i>{safe_reason}</i>\n"
             f"<i>Validating risk rules before execution...</i>"
@@ -79,29 +81,34 @@ class TelegramNotifier:
         dot = "🟢" if opt_type == "CE" else "🔴"
         delta = order.get("delta", 0.50)
         mode = order.get("trading_mode", "INTRADAY")
+        display = order.get("display_name") or order.get("contract_symbol")
+        code = order.get("contract_symbol")
+        sub = f" (<code>{code}</code>)" if display != code else ""
         
         msg = (
             f"<b>{dot} OPTION BUY ENTRY EXECUTED</b>\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"<b>Instrument:</b> <code>{order.get('contract_symbol')}</code>\n"
+            f"<b>Instrument:</b> <b>{display}</b>{sub}\n"
             f"<b>Underlying:</b> {order.get('symbol')} (Spot: ₹{order.get('spot_price', 0):,.2f})\n"
             f"<b>Type & Delta:</b> {opt_type} | Δ: {delta:+.2f}\n"
             f"<b>Fill Price:</b> ₹{order.get('entry_price', 0):.2f}\n"
-            f"<b>Quantity / Lots:</b> {order.get('quantity')} ({order.get('lots')} Lot)\n"
-            f"<b>Stop Loss (SL):</b> ₹{order.get('stop_loss', 0):.2f} (-{order.get('sl_pct', 15)}%)\n"
-            f"<b>Target (TP):</b> ₹{order.get('target', 0):.2f} (+{order.get('tp_pct', 35)}%)\n"
+            f"<b>Quantity / Lots:</b> {order.get('quantity')} ({order.get('lots', 1)} Lot)\n"
+            f"<b>Stop Loss (SL):</b> ₹{order.get('stop_loss', 0):.2f} (-{order.get('sl_pct', 15):.1f}%)\n"
+            f"<b>Target (TP):</b> ₹{order.get('target', 0):.2f} (+{order.get('tp_pct', 35):.1f}%)\n"
             f"<b>Holding Mode:</b> {mode}\n"
             f"<b>Estimated Margin:</b> ₹{order.get('entry_price', 0) * order.get('quantity', 0):,.2f}"
         )
         self.send_message(msg)
 
-    def notify_trailing_sl(self, contract: str, old_sl: float, new_sl: float, current_price: float, profit_pct: float):
+    def notify_trailing_sl(self, contract: str, old_sl: float, new_sl: float, current_price: float, profit_pct: float, display_name: str = ""):
         if not self.toggles.get("trailing_sl_updated", True):
             return
+        display = display_name if display_name else contract
+        sub = f" (<code>{contract}</code>)" if display != contract else ""
         msg = (
             f"<b>🔄 TRAILING STOP-LOSS UPDATED</b>\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"<b>Contract:</b> <code>{contract}</code>\n"
+            f"<b>Contract:</b> <b>{display}</b>{sub}\n"
             f"<b>Current Price:</b> ₹{current_price:.2f} (Gain: +{profit_pct:.1f}%)\n"
             f"<b>Old SL:</b> ₹{old_sl:.2f} ➔ <b>New Trailed SL:</b> ₹{new_sl:.2f}\n"
             f"<i>Risk locked in at breakeven / higher profit.</i>"
@@ -114,11 +121,14 @@ class TelegramNotifier:
         net_pnl = exit_info.get("net_pnl", 0.0)
         roi = exit_info.get("roi_pct", 0.0)
         pnl_emoji = "🎉 <b>PROFIT!</b> 🟢" if net_pnl >= 0 else "🛑 <b>LOSS</b> 🔴"
+        display = exit_info.get("display_name") or exit_info.get("contract_symbol")
+        code = exit_info.get("contract_symbol")
+        sub = f" (<code>{code}</code>)" if display != code else ""
         
         msg = (
             f"<b>{pnl_emoji} POSITION CLOSED</b>\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"<b>Contract:</b> <code>{exit_info.get('contract_symbol')}</code>\n"
+            f"<b>Contract:</b> <b>{display}</b>{sub}\n"
             f"<b>Exit Reason:</b> <b>{exit_info.get('exit_reason')}</b>\n"
             f"<b>Buy Price:</b> ₹{exit_info.get('entry_price', 0):.2f}\n"
             f"<b>Exit Price:</b> ₹{exit_info.get('exit_price', 0):.2f}\n"
