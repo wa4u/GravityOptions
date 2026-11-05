@@ -54,6 +54,46 @@ class TelegramNotifier:
             log.error(f"Telegram error: {e}")
             return False
 
+    def notify_login_success(self, client_id: str, broker: str = "Angel One"):
+        if not self.toggles.get("login_success", True):
+            return
+        from src.utils.time_utils import get_now_ist
+        now_str = get_now_ist().strftime("%d %b %Y, %I:%M:%S %p IST")
+        safe_client = html.escape(str(client_id))
+        safe_broker = html.escape(str(broker))
+
+        msg = (
+            f"<b>🔐 BROKER AUTHENTICATION SUCCESSFUL</b> 🟢\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"<b>Broker:</b> {safe_broker} SmartAPI\n"
+            f"<b>Client ID:</b> <code>{safe_client}</code>\n"
+            f"<b>Status:</b> Connected &amp; Session Active\n"
+            f"<b>Time:</b> {now_str}\n"
+            f"<i>Live data feed, Open Interest analyzer, and risk engines are online and ready for trading.</i>"
+        )
+        self.send_message(msg)
+
+    def notify_login_failed(self, client_id: str, broker: str = "Angel One", reason: str = ""):
+        if not self.toggles.get("login_success", True):
+            return
+        from src.utils.time_utils import get_now_ist
+        now_str = get_now_ist().strftime("%d %b %Y, %I:%M:%S %p IST")
+        safe_client = html.escape(str(client_id))
+        safe_broker = html.escape(str(broker))
+        safe_reason = html.escape(str(reason)) if reason else "Invalid credentials or TOTP error"
+
+        msg = (
+            f"<b>🚨 BROKER LOGIN FAILED</b> 🔴\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"<b>Broker:</b> {safe_broker} SmartAPI\n"
+            f"<b>Client ID:</b> <code>{safe_client}</code>\n"
+            f"<b>Status:</b> Authentication Failed\n"
+            f"<b>Reason:</b> <i>{safe_reason}</i>\n"
+            f"<b>Time:</b> {now_str}\n"
+            f"<b>Action:</b> Falling back to Mock Replay Feed. Please check credentials/TOTP."
+        )
+        self.send_message(msg)
+
     def notify_signal(
         self,
         symbol: str,

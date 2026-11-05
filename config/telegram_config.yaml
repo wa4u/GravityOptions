@@ -9,6 +9,7 @@ telegram:
 
   # Granular alert toggles - turn ON (true) or OFF (false) per your preference
   notifications:
+    login_success: true        # Alert on successful broker login / session authentication
     signal_detected: true      # Alert when strategy detects a buy setup
     order_entry: true          # Alert on buy entry with strike, price, lot, SL, TP
     trailing_sl_updated: true  # Alert when SL moves to breakeven or trails higher

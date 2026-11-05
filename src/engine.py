@@ -77,14 +77,18 @@ class TradingEngine:
         creds = self.config.get("credentials", {}).get("angelone", {})
 
         if broker_choice == "angelone" and creds.get("client_id") and "YOUR_" not in creds.get("client_id"):
+            client_id = creds.get("client_id", "")
             feed = AngelOneFeed(
                 api_key=creds.get("api_key", ""),
-                client_id=creds.get("client_id", ""),
+                client_id=client_id,
                 password=creds.get("pin_or_password", ""),
                 totp_secret=creds.get("totp_secret", "")
             )
             if feed.connect():
+                self.telegram_notifier.notify_login_success(client_id=client_id, broker="Angel One")
                 return feed
+            else:
+                self.telegram_notifier.notify_login_failed(client_id=client_id, broker="Angel One", reason="SmartAPI authentication rejected or TOTP invalid")
             log.warning("Angel One connection failed. Falling back to Mock Replay Feed.")
 
         # Default fallback: mock replay feed
