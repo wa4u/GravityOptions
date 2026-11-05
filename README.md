@@ -2,6 +2,8 @@
 
 Automated algorithmic options buying trading system tailored for Indian Indices (**Nifty 50, Bank Nifty, Sensex, FinNifty**) and high-momentum **Stock Options**, featuring a realistic paper trading simulator, strict risk & anti-theta management, and granular Telegram notifications.
 
+> 📖 **Comprehensive System & Strategy Guide:** For complete in-depth documentation covering universe selection, smart strike algorithms, entry/exit mechanics, and VPS operations, see [**docs/STRATEGY_AND_SYSTEM_GUIDE.md**](docs/STRATEGY_AND_SYSTEM_GUIDE.md).
+
 ---
 
 ## 🚀 Key Features
