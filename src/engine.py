@@ -219,7 +219,9 @@ class TradingEngine:
             signal: Optional[IndexSignal] = self.index_screener.evaluate_orb_setup(
                 symbol=symbol,
                 candles=candles,
-                strike_step=cfg.get("strike_step", 50)
+                strike_step=cfg.get("strike_step", 50),
+                strike_mode=cfg.get("strike_mode", "deep_itm"),
+                itm_depth=cfg.get("itm_depth", 2)
             )
 
             if signal:

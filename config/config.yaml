@@ -12,6 +12,10 @@ system:
   stagnation_timeout_mins: 20 # Exit option if no favorable move in 20 mins (anti-theta)
   candle_interval: "5m"       # "3m" or "5m" for fast options momentum (was 15m)
   trade_cooldown_mins: 15     # 15m cooldown after trade exit to avoid chop re-entry
+  midday_pause:
+    enabled: true             # Pause new entries during low-volume lunchtime chop
+    start_time: "11:30"       # Freeze new entries at 11:30 IST
+    resume_time: "13:15"      # Resume entries at 13:15 IST (afternoon European open window)
   web_report_path: "/home/gravitywork/public_html/index.html" # Automatically update website!
 
 
@@ -34,7 +38,9 @@ indices:
     fixed_lots: 1
     max_lots: 5
     atm_offset: 0            # 0 = ATM, -1 = 1 strike ITM for Call / OTM for Put
-    prefer_itm_delta: 0.55   # Target delta between 0.50 and 0.65
+    prefer_itm_delta: 0.75   # Target delta between 0.70 and 0.80 for deep ITM
+    strike_mode: "deep_itm"  # Options: "deep_itm" (2 strikes ITM for high Delta/low theta) or "atm"
+    itm_depth: 2             # 2 strikes ITM (~100 pts on Nifty)
 
   BANKNIFTY:
     enabled: true

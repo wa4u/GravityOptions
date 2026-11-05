@@ -80,11 +80,13 @@ class IndexScreener:
         self,
         symbol: str,
         candles: List[Candle],
-        strike_step: int = 50
+        strike_step: int = 50,
+        strike_mode: str = "deep_itm",
+        itm_depth: int = 2
     ) -> Optional[IndexSignal]:
         """
         Check for 15-minute Opening Range Breakout strictly using TODAY's opening range
-        with VWAP and EMA confirmation.
+        with VWAP and EMA confirmation. Evaluates strictly on COMPLETED (closed) 5m bars.
         """
         df = self.calculate_indicators(candles)
         if df.empty or len(df) < 5:
@@ -92,7 +94,8 @@ class IndexScreener:
 
         # Filter strictly for today's session
         from src.utils.time_utils import get_now_ist
-        today_date = get_now_ist().date()
+        now = get_now_ist()
+        today_date = now.date()
         latest_date = df["date_only"].iloc[-1]
         
         # Guard: Ensure candle data contains today's actual trading session
@@ -111,51 +114,84 @@ class IndexScreener:
         orb_high = orb_bars["high"].max()
         orb_low = orb_bars["low"].min()
 
-        last_row = today_df.iloc[-1]
-        prev_row = today_df.iloc[-2]
+        # Strict Closed Bar Check:
+        # Determine whether the latest row in today_df is a completed bar or still forming
+        last_candle_ts = today_df.iloc[-1]["timestamp"]
+        if hasattr(last_candle_ts, "tzinfo") and last_candle_ts.tzinfo is not None:
+            age_secs = (now - last_candle_ts).total_seconds()
+        else:
+            age_secs = (now.replace(tzinfo=None) - last_candle_ts).total_seconds()
 
-        current_close = last_row["close"]
-        current_open = last_row["open"]
+        # If the latest 5m candle has been open for less than 285s (4m 45s), it is still forming!
+        # In that case, evaluate strictly on the last completed bar (today_df.iloc[-2])
+        if age_secs < 285 and len(today_df) >= 5:
+            eval_row = today_df.iloc[-2]
+            prev_row = today_df.iloc[-3]
+        else:
+            eval_row = today_df.iloc[-1]
+            prev_row = today_df.iloc[-2]
+
+        current_close = eval_row["close"]
+        current_open = eval_row["open"]
         prev_close = prev_row["close"]
-        vwap = last_row["vwap"]
-        ema_f = last_row["ema_fast"]
-        ema_s = last_row["ema_slow"]
+        vwap = eval_row["vwap"]
+        ema_f = eval_row["ema_fast"]
+        ema_s = eval_row["ema_slow"]
 
         # Small 0.05% buffer (~12 pts Nifty / ~28 pts Bank Nifty) to eliminate false wick sweeps
         buffer = 0.0005
 
-        # Bullish Breakout: Decisive green candle closing above today's ORB High, above VWAP, EMA Bullish
+        # Base ATM strike rounded to nearest step
+        atm_strike = round(round(current_close / strike_step) * strike_step, 1)
+
+        # Bullish Breakout: Decisive closed green candle above today's ORB High, above VWAP, EMA Bullish
         if (current_close > (orb_high * (1.0 + buffer)) and prev_close <= orb_high and 
             current_close > current_open and current_close > vwap and ema_f > ema_s):
             
-            # Select ATM / slightly ITM Call
-            atm_strike = round(round(current_close / strike_step) * strike_step, 1)
-            reason = f"Bullish Breakout: Broke Today's ORB High ₹{orb_high:.1f} | Close > VWAP ₹{vwap:.1f} | EMA Bullish"
+            # Strike Selection: Deep ITM (ITM 2, Delta ~0.75) vs ATM (Delta ~0.50)
+            if strike_mode.lower() == "deep_itm":
+                target_strike = atm_strike - (itm_depth * strike_step)
+                delta_est = 0.75
+                depth_label = f"Deep ITM ({itm_depth} strikes)"
+            else:
+                target_strike = atm_strike
+                delta_est = 0.55
+                depth_label = "ATM"
+
+            reason = f"Bullish Breakout: Closed Bar > ORB High ₹{orb_high:.1f} | Close > VWAP ₹{vwap:.1f} | EMA Bullish ({depth_label})"
             return IndexSignal(
                 symbol=symbol,
                 direction="BUY_CALL",
                 option_type="CE",
                 spot_price=current_close,
                 trigger_reason=reason,
-                target_strike=atm_strike,
-                delta_estimate=0.55
+                target_strike=target_strike,
+                delta_estimate=delta_est
             )
 
-        # Bearish Breakdown: Decisive red candle closing below today's ORB Low, below VWAP, EMA Bearish
+        # Bearish Breakdown: Decisive closed red candle below today's ORB Low, below VWAP, EMA Bearish
         elif (current_close < (orb_low * (1.0 - buffer)) and prev_close >= orb_low and 
               current_close < current_open and current_close < vwap and ema_f < ema_s):
             
-            # Select ATM / slightly ITM Put
-            atm_strike = round(round(current_close / strike_step) * strike_step, 1)
-            reason = f"Bearish Breakdown: Broke Today's ORB Low ₹{orb_low:.1f} | Close < VWAP ₹{vwap:.1f} | EMA Bearish"
+            # Strike Selection: Deep ITM (ITM 2, Delta ~ -0.75) vs ATM (Delta ~ -0.50)
+            if strike_mode.lower() == "deep_itm":
+                target_strike = atm_strike + (itm_depth * strike_step)
+                delta_est = -0.75
+                depth_label = f"Deep ITM ({itm_depth} strikes)"
+            else:
+                target_strike = atm_strike
+                delta_est = -0.55
+                depth_label = "ATM"
+
+            reason = f"Bearish Breakdown: Closed Bar < ORB Low ₹{orb_low:.1f} | Close < VWAP ₹{vwap:.1f} | EMA Bearish ({depth_label})"
             return IndexSignal(
                 symbol=symbol,
                 direction="BUY_PUT",
                 option_type="PE",
                 spot_price=current_close,
                 trigger_reason=reason,
-                target_strike=atm_strike,
-                delta_estimate=-0.55
+                target_strike=target_strike,
+                delta_estimate=delta_est
             )
 
         return None

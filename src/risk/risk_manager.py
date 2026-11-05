@@ -57,7 +57,19 @@ class RiskManager:
         if broken:
             return False, f"Trading halted: {reason}"
 
-        # 2. Concurrent position limit
+        # 2. Midday Chop Pause Window (11:30 - 13:15 IST)
+        pause_cfg = self.config.get("system", {}).get("midday_pause", {})
+        if pause_cfg.get("enabled", True):
+            now_time = get_now_ist().time()
+            from datetime import time
+            start_parts = [int(p) for p in pause_cfg.get("start_time", "11:30").split(":")]
+            resume_parts = [int(p) for p in pause_cfg.get("resume_time", "13:15").split(":")]
+            pause_start = time(start_parts[0], start_parts[1])
+            pause_resume = time(resume_parts[0], resume_parts[1])
+            if pause_start <= now_time < pause_resume:
+                return False, f"Midday chop pause active ({now_time.strftime('%H:%M')} IST). Resumes at {pause_cfg.get('resume_time', '13:15')} IST."
+
+        # 3. Concurrent position limit
         if len(broker.positions) >= self.max_open_trades:
             return False, f"Max concurrent trades ({self.max_open_trades}) reached"
 
