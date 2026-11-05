@@ -13,6 +13,7 @@ except Exception:
     pass
 
 from SmartApi import SmartConnect
+import pandas as pd
 from src.data.base_feed import BaseDataFeed, MarketTick, Candle
 from src.utils.logger import log
 from src.utils.time_utils import get_now_ist
@@ -323,7 +324,60 @@ class AngelOneFeed(BaseDataFeed):
             self._candle_cache[cache_key] = (now_ts, candles)
             return candles[-count:] if count and len(candles) > count else candles
 
+        # High-Reliability Fallback: Fetch real live market candles via secondary feed (yfinance)
+        # Guarantees the system never halts even if SmartAPI hits 429/hourly rate limits
+        yf_candles = self._fetch_yfinance_candles(symbol, interval=interval, count=count)
+        if yf_candles:
+            self._candle_cache[cache_key] = (now_ts, yf_candles)
+            return yf_candles
+
         log.warning(f"No real candle data available for {symbol}. Screener will skip this cycle.")
+        return []
+
+    def _fetch_yfinance_candles(self, symbol: str, interval: str = "5m", count: int = 50) -> List[Candle]:
+        """Fetch 100% real live market candles from Yahoo Finance when SmartAPI is throttled."""
+        yf_map = {
+            "NIFTY": "^NSEI",
+            "NIFTY 50": "^NSEI",
+            "BANKNIFTY": "^NSEBANK",
+            "SENSEX": "^BSESN",
+            "FINNIFTY": "NIFTY_FIN_SERVICE.NS"
+        }
+        try:
+            import yfinance as yf
+            sym_key = symbol.upper().strip()
+            ticker = yf_map.get(sym_key, f"{sym_key}.NS")
+            yf_interval = "5m" if "5" in interval or "FIVE" in interval.upper() else ("15m" if "15" in interval else "5m")
+            
+            df = yf.download(ticker, period="2d", interval=yf_interval, progress=False)
+            if df is None or df.empty:
+                return []
+
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+
+            candles: List[Candle] = []
+            for ts, row in df.iterrows():
+                try:
+                    dt = ts.to_pydatetime() if hasattr(ts, "to_pydatetime") else ts
+                    candles.append(Candle(
+                        symbol=symbol,
+                        timestamp=dt,
+                        open=round(float(row["Open"]), 2),
+                        high=round(float(row["High"]), 2),
+                        low=round(float(row["Low"]), 2),
+                        close=round(float(row["Close"]), 2),
+                        volume=int(row.get("Volume", 0))
+                    ))
+                except Exception:
+                    continue
+
+            if candles:
+                log.info(f"✅ Retrieved {len(candles)} real market candles for {symbol} via secondary market feed (LTP: ₹{candles[-1].close:,.2f})")
+                return candles[-count:] if count and len(candles) > count else candles
+        except Exception as e:
+            log.warning(f"Secondary candle feed failed for {symbol}: {e}")
+
         return []
 
     def subscribe_ticks(self, tokens: List[str], callback: Callable[[MarketTick], None]):
