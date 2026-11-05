@@ -67,7 +67,7 @@ class TelegramNotifier:
             f"━━━━━━━━━━━━━━━━━━\n"
             f"<b>Broker:</b> {safe_broker} SmartAPI\n"
             f"<b>Client ID:</b> <code>{safe_client}</code>\n"
-            f"<b>Status:</b> Connected &amp; Session Active\n"
+            f"<b>Status:</b> Connected and Session Active\n"
             f"<b>Time:</b> {now_str}\n"
             f"<i>Live data feed, Open Interest analyzer, and risk engines are online and ready for trading.</i>"
         )
