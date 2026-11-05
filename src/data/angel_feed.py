@@ -1,5 +1,4 @@
 import time
-import random
 import logging
 from datetime import datetime, timedelta
 from typing import Callable, Dict, List, Optional
@@ -16,6 +15,7 @@ except Exception:
 from SmartApi import SmartConnect
 from src.data.base_feed import BaseDataFeed, MarketTick, Candle
 from src.utils.logger import log
+from src.utils.time_utils import get_now_ist
 
 KNOWN_TOKENS = {
     # Major Indices
@@ -268,8 +268,9 @@ class AngelOneFeed(BaseDataFeed):
 
         if self.is_connected and self.smart_api and sym_token:
             try:
+                now_ist = get_now_ist()
                 if to_time is None:
-                    to_time = datetime.now()
+                    to_time = now_ist
                 if from_time is None:
                     from_time = to_time - timedelta(days=5)
 
@@ -286,7 +287,7 @@ class AngelOneFeed(BaseDataFeed):
                 
                 self._rate_limit(0.40)
                 resp = self.smart_api.getCandleData(params)
-                if resp.get("status") and resp.get("data"):
+                if resp and resp.get("status") and resp.get("data"):
                     for row in resp["data"]:
                         try:
                             dt = date_parser.parse(str(row[0]))
@@ -301,51 +302,18 @@ class AngelOneFeed(BaseDataFeed):
                             ))
                         except Exception:
                             continue
-            except Exception:
-                pass
+                else:
+                    err_msg = resp.get("message") if resp else "No response"
+                    log.warning(f"SmartAPI getCandleData returned no candles for {symbol} ({sym_token}, {exch}): {err_msg}")
+            except Exception as e:
+                log.error(f"Exception fetching candles for {symbol} ({sym_token}): {e}")
 
         if candles:
             self._candle_cache[cache_key] = (now_ts, candles)
             return candles[-count:] if count and len(candles) > count else candles
 
-        # Fallback: synthesize recent candles around live LTP so screener stays healthy
-        base_ltp = self.get_ltp(symbol, exchange)
-        if base_ltp <= 0:
-            if "NIFTY" in symbol:
-                base_ltp = 24200.0
-            elif "BANKNIFTY" in symbol:
-                base_ltp = 51500.0
-            elif "SENSEX" in symbol:
-                base_ltp = 79500.0
-            else:
-                base_ltp = 1500.0
-
-        synth_candles: List[Candle] = []
-        curr = base_ltp
-        now = datetime.now()
-        step_minutes = 15 if "15" in interval or "FIFTEEN" in api_interval else 5
-        for i in range(count):
-            dt = now - timedelta(minutes=(count - i) * step_minutes)
-            change = curr * random.uniform(-0.003, 0.004)
-            c_open = curr
-            c_close = curr + change
-            c_high = max(c_open, c_close) + abs(curr * random.uniform(0.0003, 0.001))
-            c_low = min(c_open, c_close) - abs(curr * random.uniform(0.0003, 0.001))
-            vol = random.randint(50000, 200000)
-
-            synth_candles.append(Candle(
-                symbol=symbol,
-                timestamp=dt,
-                open=round(c_open, 2),
-                high=round(c_high, 2),
-                low=round(c_low, 2),
-                close=round(c_close, 2),
-                volume=vol
-            ))
-            curr = c_close
-
-        self._candle_cache[cache_key] = (now_ts, synth_candles)
-        return synth_candles
+        log.warning(f"No real candle data available for {symbol}. Screener will skip this cycle.")
+        return []
 
     def subscribe_ticks(self, tokens: List[str], callback: Callable[[MarketTick], None]):
         """WebSocket subscription hook."""

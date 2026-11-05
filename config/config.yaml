@@ -48,7 +48,7 @@ indices:
     prefer_itm_delta: 0.55
 
   SENSEX:
-    enabled: true
+    enabled: false           # Set false: Angel One SmartAPI getCandleData does not support BSE index historical candles
     exchange: "BSE"
     spot_symbol: "SENSEX"
     lot_size: 10

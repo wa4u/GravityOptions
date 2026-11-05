@@ -91,8 +91,16 @@ class IndexScreener:
             return None
 
         # Filter strictly for today's session
+        from src.utils.time_utils import get_now_ist
+        today_date = get_now_ist().date()
         latest_date = df["date_only"].iloc[-1]
-        today_df = df[df["date_only"] == latest_date].copy()
+        
+        # Guard: Ensure candle data contains today's actual trading session
+        if latest_date != today_date:
+            log.warning(f"Index candles for {symbol} do not contain today's date ({today_date}). Latest is {latest_date}. Skipping.")
+            return None
+
+        today_df = df[df["date_only"] == today_date].copy()
 
         # Must have completed the 15-minute opening range (3 x 5m bars) plus at least 1 active bar
         if len(today_df) < 4:
@@ -113,8 +121,11 @@ class IndexScreener:
         ema_f = last_row["ema_fast"]
         ema_s = last_row["ema_slow"]
 
+        # Small 0.05% buffer (~12 pts Nifty / ~28 pts Bank Nifty) to eliminate false wick sweeps
+        buffer = 0.0005
+
         # Bullish Breakout: Decisive green candle closing above today's ORB High, above VWAP, EMA Bullish
-        if (current_close > orb_high and prev_close <= orb_high and 
+        if (current_close > (orb_high * (1.0 + buffer)) and prev_close <= orb_high and 
             current_close > current_open and current_close > vwap and ema_f > ema_s):
             
             # Select ATM / slightly ITM Call
@@ -131,7 +142,7 @@ class IndexScreener:
             )
 
         # Bearish Breakdown: Decisive red candle closing below today's ORB Low, below VWAP, EMA Bearish
-        elif (current_close < orb_low and prev_close >= orb_low and 
+        elif (current_close < (orb_low * (1.0 - buffer)) and prev_close >= orb_low and 
               current_close < current_open and current_close < vwap and ema_f < ema_s):
             
             # Select ATM / slightly ITM Put
