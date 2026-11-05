@@ -256,12 +256,12 @@ class AngelOneFeed(BaseDataFeed):
         if api_interval not in INTERVAL_MAP.values():
             api_interval = "FIFTEEN_MINUTE"
 
-        # Check 60-second cache
+        # Check 120-second cache (5-minute candles update every 5m; 120s caching saves rate limits)
         cache_key = f"{symbol}_{api_interval}"
         now_ts = time.time()
         if cache_key in self._candle_cache:
             last_ts, cached_candles = self._candle_cache[cache_key]
-            if now_ts - last_ts < 60.0 and len(cached_candles) > 0:
+            if now_ts - last_ts < 120.0 and len(cached_candles) > 0:
                 return cached_candles[-count:] if count and len(cached_candles) > count else cached_candles
 
         candles: List[Candle] = []
@@ -285,7 +285,8 @@ class AngelOneFeed(BaseDataFeed):
                     "todate": to_str
                 }
                 
-                self._rate_limit(0.40)
+                # Respect Angel One rate limit (max 1 req/sec for historical candle endpoint)
+                self._rate_limit(1.0)
                 resp = self.smart_api.getCandleData(params)
                 if resp and resp.get("status") and resp.get("data"):
                     for row in resp["data"]:
@@ -304,9 +305,19 @@ class AngelOneFeed(BaseDataFeed):
                             continue
                 else:
                     err_msg = resp.get("message") if resp else "No response"
+                    if "exceeding access rate" in str(err_msg):
+                        time.sleep(2.0)
                     log.warning(f"SmartAPI getCandleData returned no candles for {symbol} ({sym_token}, {exch}): {err_msg}")
             except Exception as e:
-                log.error(f"Exception fetching candles for {symbol} ({sym_token}): {e}")
+                err_str = str(e)
+                if "exceeding access rate" in err_str:
+                    log.warning(f"Angel One rate limit throttle hit on {symbol}. Backing off 2.5s...")
+                    time.sleep(2.5)
+                    # If we have cached candles from earlier, return them gracefully
+                    if cache_key in self._candle_cache:
+                        return self._candle_cache[cache_key][1][-count:]
+                else:
+                    log.error(f"Exception fetching candles for {symbol} ({sym_token}): {e}")
 
         if candles:
             self._candle_cache[cache_key] = (now_ts, candles)
