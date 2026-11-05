@@ -71,7 +71,7 @@ indices:
 
 # Stock Options Screener & Universe Configuration
 stocks:
-  enabled: true
+  enabled: false             # Set false temporarily to avoid SmartAPI rate limits while testing NIFTY
   # High-Beta Momentum F&O Runners + Core Large-caps
   universe:
     # High-Alpha F&O Momentum Rockets (Proven Multi-bagger Runners)

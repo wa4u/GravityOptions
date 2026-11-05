@@ -63,6 +63,7 @@ class TradingEngine:
         self.running = False
         self.eod_summary_sent = False
         self.last_heartbeat_time = 0.0
+        self.last_stock_scan_time = 0.0
         self.circuit_breaker_triggered = False
         self.cooldowns: Dict[str, datetime] = {}
         self.candle_interval = self.config.get("system", {}).get("candle_interval", "5m")
@@ -489,10 +490,14 @@ class TradingEngine:
 
         # 4. Scan for new entries
         self.scan_indices()
-        self.scan_stocks()
+        
+        now_ts = time.time()
+        # Scan stocks only once every 90 seconds to strictly respect Angel One API rate limits
+        if now_ts - self.last_stock_scan_time >= 90.0:
+            self.scan_stocks()
+            self.last_stock_scan_time = now_ts
 
         # 5. Periodic Heartbeat Log (Every 60 seconds)
-        now_ts = time.time()
         if now_ts - self.last_heartbeat_time >= 60.0:
             self._log_heartbeat()
             self.last_heartbeat_time = now_ts
