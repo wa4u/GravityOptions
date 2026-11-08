@@ -4,7 +4,7 @@
 
 system:
   mode: "paper"              # "paper" or "live"
-  broker: "angelone"         # "angelone", "upstox", or "mock"
+  broker: "angelone"         # "dhan", "angelone", or "mock" (Switch to "dhan" once subscribed)
   timezone: "Asia/Kolkata"
   trading_start_time: "09:15"
   intraday_exit_time: "15:15"
@@ -21,6 +21,9 @@ system:
 
 # Broker API Credentials (Keep secure)
 credentials:
+  dhan:
+    client_id: "YOUR_DHAN_CLIENT_ID"          # 10-digit Dhan Client ID
+    access_token: "YOUR_DHAN_ACCESS_TOKEN"    # Generate static API token from https://web.dhan.co/ -> APIs
   angelone:
     client_id: "YOUR_ANGEL_CLIENT_ID"
     pin_or_password: "YOUR_PASSWORD_OR_PIN"

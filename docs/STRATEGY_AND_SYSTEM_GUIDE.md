@@ -63,6 +63,7 @@ flowchart TD
 | Module | File | Purpose |
 | :--- | :--- | :--- |
 | **Trading Engine** | `src/engine.py` | Central coordinator; dispatches ticks, calls screeners, enforces risk checks, places trades. |
+| **DhanHQ Feed** | `src/data/dhan_feed.py` | DhanHQ API connector with native `/v2/optionchain`, live Greeks (Delta, Theta, Gamma, IV), and 5m candles. |
 | **Angel One Feed** | `src/data/angel_feed.py` | SmartAPI connector with auto-TOTP generation, rate-limiting (2.5 req/s), and real-time LTP/OI queries. |
 | **OI Analyzer** | `src/data/oi_analyzer.py` | Calculates real-time Put-Call Ratio (PCR), Call Wall (Resistance), Put Wall (Support), and Max Pain. |
 | **Instrument Manager** | `src/data/instrument_manager.py` | Resolves tokens from Angel One's instrument dump, identifies ATM/ITM/OTM strikes, and expiry dates. |

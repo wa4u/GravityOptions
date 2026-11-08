@@ -111,7 +111,17 @@ class OIAnalyzer:
             timestamp=now_ts
         )
 
-        if not self.instrument_mgr or not self.feed:
+        if not self.feed:
+            return default_result
+
+        # Check if feed supports native unified Option Chain (e.g. DhanHQ)
+        if hasattr(self.feed, "get_option_chain") and getattr(self.feed, "is_connected", False):
+            dhan_oc = self.feed.get_option_chain(sym_upper)
+            oc_dict = dhan_oc.get("oc", {}) if isinstance(dhan_oc, dict) else {}
+            if oc_dict:
+                return self._parse_dhan_option_chain(sym_upper, spot_price, oc_dict, num_strikes)
+
+        if not self.instrument_mgr:
             return default_result
 
         # 1. Resolve contract symbols & tokens for ATM ± num_strikes
@@ -278,6 +288,151 @@ class OIAnalyzer:
         )
 
         self._cache[sym_upper] = res
+        return res
+
+    def _parse_dhan_option_chain(
+        self,
+        symbol: str,
+        spot_price: float,
+        oc_dict: Dict[str, Any],
+        num_strikes: int = 5
+    ) -> OIAnalysisResult:
+        """Parses native DhanHQ Option Chain dictionary into OIAnalysisResult."""
+        now_ts = time.time()
+        parsed_strikes = []
+        for k_str, data in oc_dict.items():
+            try:
+                s_val = float(k_str)
+                parsed_strikes.append((s_val, data))
+            except (ValueError, TypeError):
+                continue
+
+        if not parsed_strikes:
+            return OIAnalysisResult(symbol=symbol, spot_price=spot_price, pcr=1.0, total_call_oi=0, total_put_oi=0,
+                                    call_wall=0.0, call_wall_oi=0, put_wall=0.0, put_wall_oi=0, max_pain=spot_price,
+                                    sentiment="NEUTRAL", is_valid=False, timestamp=now_ts)
+
+        parsed_strikes.sort(key=lambda x: x[0])
+        # Find ATM strike
+        atm_strike = min([s for s, _ in parsed_strikes], key=lambda s: abs(s - spot_price))
+        atm_idx = next(i for i, (s, _) in enumerate(parsed_strikes) if s == atm_strike)
+
+        start_idx = max(0, atm_idx - num_strikes)
+        end_idx = min(len(parsed_strikes), atm_idx + num_strikes + 1)
+        selected = parsed_strikes[start_idx:end_idx]
+
+        strikes_data: List[StrikeOIData] = []
+        total_call_oi = 0
+        total_put_oi = 0
+        total_call_oi_change = 0
+        total_put_oi_change = 0
+        max_call_oi = -1
+        max_put_oi = -1
+        call_wall = 0.0
+        put_wall = 0.0
+
+        for s, row in selected:
+            ce = row.get("ce", {}) or {}
+            pe = row.get("pe", {}) or {}
+
+            ce_oi = int(ce.get("oi", 0) or 0)
+            pe_oi = int(pe.get("oi", 0) or 0)
+            ce_chg = int(ce.get("change_in_oi", ce.get("oi_change", 0)) or 0)
+            pe_chg = int(pe.get("change_in_oi", pe.get("oi_change", 0)) or 0)
+            ce_vol = int(ce.get("volume", 0) or 0)
+            pe_vol = int(pe.get("volume", 0) or 0)
+            ce_ltp = float(ce.get("last_price", 0.0) or 0.0)
+            pe_ltp = float(pe.get("last_price", 0.0) or 0.0)
+            ce_p_chg = float(ce.get("net_change", ce.get("change", 0.0)) or 0.0)
+            pe_p_chg = float(pe.get("net_change", pe.get("change", 0.0)) or 0.0)
+
+            total_call_oi += ce_oi
+            total_put_oi += pe_oi
+            total_call_oi_change += ce_chg
+            total_put_oi_change += pe_chg
+
+            if ce_oi > max_call_oi:
+                max_call_oi = ce_oi
+                call_wall = s
+            if pe_oi > max_put_oi:
+                max_put_oi = pe_oi
+                put_wall = s
+
+            strikes_data.append(StrikeOIData(
+                strike=s,
+                ce_symbol=f"{symbol}_{int(s)}_CE",
+                ce_token=str(ce.get("security_id", "")),
+                ce_oi=ce_oi,
+                ce_oi_change=ce_chg,
+                ce_volume=ce_vol,
+                ce_ltp=ce_ltp,
+                ce_net_change=ce_p_chg,
+                ce_buildup=classify_buildup(ce_p_chg, ce_chg),
+                pe_symbol=f"{symbol}_{int(s)}_PE",
+                pe_token=str(pe.get("security_id", "")),
+                pe_oi=pe_oi,
+                pe_oi_change=pe_chg,
+                pe_volume=pe_vol,
+                pe_ltp=pe_ltp,
+                pe_net_change=pe_p_chg,
+                pe_buildup=classify_buildup(pe_p_chg, pe_chg)
+            ))
+
+        pcr = round(total_put_oi / total_call_oi, 2) if total_call_oi > 0 else 1.0
+
+        min_loss = float("inf")
+        max_pain_strike = spot_price
+        for s_cand, _ in selected:
+            tot_loss = sum(max(0, s_cand - r.strike) * r.ce_oi + max(0, r.strike - s_cand) * r.pe_oi for r in strikes_data)
+            if tot_loss < min_loss:
+                min_loss = tot_loss
+                max_pain_strike = s_cand
+
+        sentiment = "BULLISH" if pcr >= 1.05 else ("BEARISH" if pcr <= 0.85 else "NEUTRAL")
+
+        atm_row = next((r for r in strikes_data if r.strike == atm_strike), None)
+        atm_call_buildup = atm_row.ce_buildup if atm_row else "NEUTRAL"
+        atm_put_buildup = atm_row.pe_buildup if atm_row else "NEUTRAL"
+        atm_call_oi_change = atm_row.ce_oi_change if atm_row else 0
+        atm_put_oi_change = atm_row.pe_oi_change if atm_row else 0
+
+        net_writer_flow = total_put_oi_change - total_call_oi_change
+        if net_writer_flow > 50000:
+            net_oi_flow = "LONG_BUILDUP"
+        elif net_writer_flow < -50000:
+            net_oi_flow = "SHORT_BUILDUP"
+        elif total_call_oi_change < -20000 and total_put_oi_change <= 0:
+            net_oi_flow = "SHORT_COVERING"
+        elif total_put_oi_change < -20000 and total_call_oi_change <= 0:
+            net_oi_flow = "LONG_UNWINDING"
+        else:
+            net_oi_flow = "NEUTRAL"
+
+        res = OIAnalysisResult(
+            symbol=symbol,
+            spot_price=spot_price,
+            pcr=pcr,
+            total_call_oi=total_call_oi,
+            total_put_oi=total_put_oi,
+            call_wall=call_wall,
+            call_wall_oi=max_call_oi,
+            put_wall=put_wall,
+            put_wall_oi=max_put_oi,
+            max_pain=max_pain_strike,
+            sentiment=sentiment,
+            strikes_data=strikes_data,
+            is_valid=True,
+            timestamp=now_ts,
+            net_oi_flow=net_oi_flow,
+            atm_strike=atm_strike,
+            atm_call_buildup=atm_call_buildup,
+            atm_put_buildup=atm_put_buildup,
+            atm_call_oi_change=atm_call_oi_change,
+            atm_put_oi_change=atm_put_oi_change,
+            total_call_oi_change=total_call_oi_change,
+            total_put_oi_change=total_put_oi_change
+        )
+        self._cache[symbol] = res
         return res
 
     def validate_signal(

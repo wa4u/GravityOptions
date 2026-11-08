@@ -1,4 +1,5 @@
 # GravityOptions Dependencies
+dhanhq>=2.3.0
 smartapi-python>=1.5.0
 logzero>=1.7.0
 websocket-client>=1.6.0
