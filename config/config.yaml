@@ -80,7 +80,8 @@ indices:
 
 # Stock Options Screener & Universe Configuration
 stocks:
-  enabled: false             # Set false temporarily to avoid SmartAPI rate limits while testing NIFTY
+  enabled: true              # Re-enabled with DhanHQ quality feed for extensive data collection
+  scan_interval_seconds: 30  # Scan stock universe every 30 seconds
   # High-Beta Momentum F&O Runners + Core Large-caps
   universe:
     # High-Alpha F&O Momentum Rockets (Proven Multi-bagger Runners)
@@ -126,14 +127,14 @@ oi_analysis:
 position_sizing:
   mode: "fixed_lots"         # Options: "fixed_lots" or "risk_percentage"
   risk_per_trade_pct: 1.5    # Percentage of virtual/live capital at risk per trade
-  virtual_capital: 100000.0  # Initial paper trading account balance (INR)
+  virtual_capital: 200000.0  # Initial paper trading account balance (INR 2,00,000)
 
-# Risk Management & Circuit Breakers
+# Risk Management & Circuit Breakers (Expanded for active research & rich data gathering)
 risk:
-  max_daily_loss_inr: 5000.0 # Hard daily loss cutoff across all trades
-  max_open_trades: 3         # Max concurrent active trades
-  max_daily_trades: 5        # Hard limit on total trades per day to prevent overtrading
-  max_trades_per_symbol: 2   # Max trades allowed on a single symbol per day
+  max_daily_loss_inr: 15000.0 # Hard daily loss cutoff across all trades (7.5% of 2L)
+  max_open_trades: 8          # Max concurrent active trades (expanded from 3 to 8 for broad market capture)
+  max_daily_trades: 20        # Hard limit on total trades per day (expanded from 5 to 20 for data gathering)
+  max_trades_per_symbol: 3    # Max trades allowed on a single symbol per day
   stop_loss_pct: 15.0        # Default stop-loss on option premium (e.g., 15%)
   target_profit_pct: 35.0    # First target profit on option premium (e.g., 35%)
   trail_sl_trigger_pct: 15.0 # Move SL to breakeven once profit reaches 15%

@@ -527,8 +527,9 @@ class TradingEngine:
         self.scan_indices()
         
         now_ts = time.time()
-        # Scan stocks only once every 90 seconds to strictly respect Angel One API rate limits
-        if now_ts - self.last_stock_scan_time >= 90.0:
+        # Scan stocks dynamically based on configuration (default 30s for high-speed feed)
+        stock_interval = float(self.config.get("stocks", {}).get("scan_interval_seconds", 30.0))
+        if now_ts - self.last_stock_scan_time >= stock_interval:
             self.scan_stocks()
             self.last_stock_scan_time = now_ts
 

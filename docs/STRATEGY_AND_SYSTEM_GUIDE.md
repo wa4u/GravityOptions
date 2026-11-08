@@ -173,12 +173,13 @@ To prevent overtrading and revenge trading, strict portfolio caps are enforced b
 
 | Risk Rule | Setting | Purpose |
 | :--- | :--- | :--- |
-| **Max Daily Trades** | **5 Trades / Day** | Hard ceiling; once 5 trades conclude, no new trades are allowed today. |
-| **Max Trades per Symbol** | **2 Trades / Symbol** | Prevents repeatedly taking losses in a choppy, non-trending asset. |
-| **Max Concurrent Positions** | **3 Positions** | Restricts portfolio exposure to a maximum of 3 concurrent option trades. |
+| **Virtual Capital** | **₹2,00,000** | Active paper trading account capital for sizing and realistic simulation. |
+| **Max Concurrent Positions** | **8 Positions** | Expanded from 3 to 8 to capture index and stock momentum opportunities simultaneously. |
+| **Max Daily Trades** | **20 Trades / Day** | Expanded to collect rich statistical trading data across the full session. |
+| **Max Trades per Symbol** | **3 Trades / Symbol** | Allows re-entry on valid second-leg trends while avoiding endless chop loops. |
 | **Post-Trade Cooldown** | **15 Minutes** | Mandates a 15-minute wait after any position closes before re-evaluating the same symbol. |
-| **Virtual Capital** | **₹1,00,000** | Base paper account capital for sizing calculations. |
-| **Risk per Trade** | **2.0% (or Fixed 1 Lot)** | Limits maximum loss on any single trade to 2% of equity. |
+| **Max Daily Loss Limit** | **₹15,000 (7.5%)** | Hard circuit breaker halting all new trades if daily drawdown is reached. |
+| **Risk per Trade** | **1.5% (or Fixed 1 Lot)** | Limits maximum loss on any single trade to 1.5% of equity. |
 
 ---
 
