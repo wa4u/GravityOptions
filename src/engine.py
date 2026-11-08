@@ -241,20 +241,29 @@ class TradingEngine:
                             oi_result=oi_res,
                             min_pcr_call=oi_cfg.get("min_pcr_for_call", 0.90),
                             max_pcr_put=oi_cfg.get("max_pcr_for_put", 1.15),
-                            min_wall_dist=oi_cfg.get("min_distance_to_wall", 25.0)
+                            min_wall_dist=oi_cfg.get("min_distance_to_wall", 25.0),
+                            min_conviction_score=oi_cfg.get("min_conviction_score", 55)
                         )
                         if not valid_oi:
-                            log.info(f"🛡️ [OI Filter] {symbol} {signal.direction} blocked: {oi_rsn}")
+                            log.info(f"🛡️ [Order Flow Filter] {symbol} {signal.direction} blocked: {oi_rsn}")
                             continue
 
-                        log.info(f"✅ [OI Filter] {symbol} {signal.direction} confirmed: {oi_rsn}")
+                        log.info(f"🔥 [Order Flow Confirmed] {symbol} {signal.direction}: {oi_rsn}")
                         oi_info_dict = {
                             "is_valid": True,
                             "pcr": oi_res.pcr,
                             "sentiment": oi_res.sentiment,
                             "call_wall": oi_res.call_wall,
                             "put_wall": oi_res.put_wall,
-                            "max_pain": oi_res.max_pain
+                            "max_pain": oi_res.max_pain,
+                            "conviction_score": getattr(oi_res, "conviction_score", 50),
+                            "conviction_summary": getattr(oi_res, "conviction_summary", ""),
+                            "net_oi_flow": getattr(oi_res, "net_oi_flow", "NEUTRAL"),
+                            "atm_strike": getattr(oi_res, "atm_strike", 0.0),
+                            "atm_call_buildup": getattr(oi_res, "atm_call_buildup", "NEUTRAL"),
+                            "atm_put_buildup": getattr(oi_res, "atm_put_buildup", "NEUTRAL"),
+                            "atm_call_oi_change": getattr(oi_res, "atm_call_oi_change", 0),
+                            "atm_put_oi_change": getattr(oi_res, "atm_put_oi_change", 0),
                         }
 
                 opt_info = self.instrument_mgr.find_option_contract(symbol, signal.target_strike, signal.option_type)
@@ -401,7 +410,15 @@ class TradingEngine:
                         "sentiment": best_strike_info.get("buildup", "LONG_BUILDUP"),
                         "call_wall": target_strike,
                         "put_wall": target_strike,
-                        "max_pain": target_strike
+                        "max_pain": target_strike,
+                        "conviction_score": 75 if best_strike_info.get("buildup") == "LONG_BUILDUP" else 60,
+                        "conviction_summary": f"Smart Strike Build-Up: {best_strike_info.get('buildup')}",
+                        "net_oi_flow": best_strike_info.get("buildup", "LONG_BUILDUP"),
+                        "atm_strike": target_strike,
+                        "atm_call_buildup": best_strike_info.get("buildup", "LONG_BUILDUP"),
+                        "atm_put_buildup": "NEUTRAL",
+                        "atm_call_oi_change": best_strike_info.get("oi_change", 0),
+                        "atm_put_oi_change": 0
                     }
 
                 self.telegram_notifier.notify_signal(

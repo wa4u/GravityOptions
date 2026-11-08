@@ -119,9 +119,21 @@ class TelegramNotifier:
             cw = oi_info.get("call_wall", 0.0)
             pw = oi_info.get("put_wall", 0.0)
             mp = oi_info.get("max_pain", 0.0)
+            score = oi_info.get("conviction_score", 50)
+            flow = oi_info.get("net_oi_flow", "NEUTRAL")
+            c_chg = oi_info.get("atm_call_oi_change", 0)
+            p_chg = oi_info.get("atm_put_oi_change", 0)
+
+            c_tag = f"{c_chg:+,d}" if abs(c_chg) < 100000 else f"{c_chg/100000:+.2f}L"
+            p_tag = f"{p_chg:+,d}" if abs(p_chg) < 100000 else f"{p_chg/100000:+.2f}L"
+            score_badge = "🔥 [HIGH]" if score >= 70 else ("⚡ [MODERATE]" if score >= 55 else "⚠️ [LOW]")
+
             oi_line = (
-                f"<b>📊 PCR Sentiment:</b> {pcr:.2f} ({sent})\n"
-                f"<b>🛡️ Put Wall:</b> ₹{pw:,.0f} | <b>🧱 Call Wall:</b> ₹{cw:,.0f} | <b>🎯 MaxPain:</b> ₹{mp:,.0f}\n"
+                f"<b>🧠 Institutional Conviction:</b> <code>{score}/100</code> {score_badge}\n"
+                f"<b>🌊 Order Flow:</b> <b>{flow}</b>\n"
+                f"<b>⚡ ATM Writer Flow:</b> CE: <code>{c_tag}</code> | PE: <code>{p_tag}</code>\n"
+                f"<b>📊 PCR:</b> <code>{pcr:.2f}</code> ({sent}) | <b>🎯 MaxPain:</b> ₹{mp:,.0f}\n"
+                f"<b>🛡️ Put Wall:</b> ₹{pw:,.0f} | <b>🧱 Call Wall:</b> ₹{cw:,.0f}\n"
             )
 
         msg = (
@@ -154,7 +166,12 @@ class TelegramNotifier:
             pcr = oi_info.get("pcr", 1.0)
             cw = oi_info.get("call_wall", 0.0)
             pw = oi_info.get("put_wall", 0.0)
-            oi_line = f"<b>OI Confirmation:</b> PCR {pcr:.2f} | Put ₹{pw:,.0f} | Call ₹{cw:,.0f}\n"
+            score = oi_info.get("conviction_score", 50)
+            flow = oi_info.get("net_oi_flow", "NEUTRAL")
+            oi_line = (
+                f"<b>🧠 Conviction:</b> <code>{score}/100</code> | <b>Flow:</b> <b>{flow}</b>\n"
+                f"<b>📊 OI Confirmation:</b> PCR {pcr:.2f} | Put ₹{pw:,.0f} | Call ₹{cw:,.0f}\n"
+            )
         
         msg = (
             f"<b>{dot} OPTION BUY ENTRY EXECUTED</b>\n"

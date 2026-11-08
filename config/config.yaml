@@ -109,9 +109,10 @@ stocks:
     min_profit_pct: 15.0     # Must be in >= 15% profit to carry overnight
     min_days_to_expiry: 7    # Avoid carry forward in expiry week (physical delivery risk)
 
-# Open Interest (OI) & Put-Call Ratio (PCR) Institutional Sentiment Gate
+# Open Interest (OI) & Institutional Order Flow Conviction Gate (MrChartist Model)
 oi_analysis:
   enabled: true
+  min_conviction_score: 55     # Minimum Institutional Conviction (0-100) required to open trade
   min_pcr_for_call: 0.90      # Minimum PCR required to take a BUY_CALL (rejects call traps)
   max_pcr_for_put: 1.15       # Maximum PCR required to take a BUY_PUT (rejects put traps)
   min_distance_to_wall: 25.0  # Minimum buffer (points) from Call Wall/Put Wall to avoid slamming into resistance/support

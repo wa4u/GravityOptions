@@ -123,40 +123,45 @@ Rather than arbitrarily picking deep OTM contracts (which suffer high decay), th
 - Target Delta ($\Delta$): **0.50 – 0.65**.
 - ITM/ATM contracts offer high intrinsic responsiveness and resist theta decay better than OTM strikes.
 
-### 2. Option Hub "Smart Strike" Engine
-Inspired by institutional volume profiles:
-- **Volume Leadership:** Automatically checks nearby strikes to select the **#1 Volume strike**.
-- **Long Build-Up Confirmation:** Validates that Option Price is rising **and** Open Interest (OI) is increasing (+OI change).
+### 2. Option Hub & Institutional Order Flow Engine (MrChartist Model)
+Inspired by institutional volume profiles and the 4-quadrant money flow model:
+- **4-Quadrant Derivative Build-Up Matrix:**
+  - **Long Build-Up ($\uparrow$ Price, $\uparrow$ OI):** Fresh aggressive institutional buying $\rightarrow$ **High Conviction CE**.
+  - **Short Build-Up ($\downarrow$ Price, $\uparrow$ OI):** Institutions shorting / call writing $\rightarrow$ **High Conviction PE**.
+  - **Short Covering ($\uparrow$ Price, $\downarrow$ OI):** Trapped bears covering shorts $\rightarrow$ Quick squeeze, prone to stall.
+  - **Long Unwinding ($\downarrow$ Price, $\downarrow$ OI):** Bulls dumping losing longs $\rightarrow$ Fast liquidation, lacks aggressive sellers.
+- **The 4-Pillar Conviction Meter (0 to 100 Score):**
+  1. **PCR Sentiment (Max 25 pts):** Measures baseline put/call writer participation.
+  2. **ATM Strike Writer Dynamics (Max 30 pts):** Evaluates if Call sellers are retreating (-OI) or defending (+OI) at ATM, and if Put sellers are loading support (+OI).
+  3. **Build-Up Quadrant (Max 25 pts):** Validates underlying/strike build-up alignment.
+  4. **Wall Resistance/Support Clearance (Max 20 pts):** Ensures trade isn't slamming right into a Call/Put Wall.
+  - *Hard Gate:* Trades require $\ge 55/100$ Conviction to execute; low conviction traps are blocked.
 - **Call Wall & Put Wall Checks:**
-  - **Call Wall (Highest Call OI):** Major resistance. Long CE trades entering right below the Call Wall are deprioritized or sized down.
-  - **Put Wall (Highest Put OI):** Major support. Long PE trades entering right above the Put Wall are deprioritized.
-- **PCR Sentiment Filter:**
-  - $PCR > 1.15$: Bullish bias (Puts being written heavily). Favors CE.
-  - $PCR < 0.85$: Bearish bias (Calls being written heavily). Favors PE.
-  - $0.85 \le PCR \le 1.15$: Neutral zone; requires stronger price breakout confirmation.
+  - **Call Wall (Highest Call OI):** Major resistance. Long CE trades entering right below the Call Wall are blocked.
+  - **Put Wall (Highest Put OI):** Major support. Long PE trades entering right above the Put Wall are blocked.
 
 ---
 
 ## 5. Signal Generation & Entry Rules
 
-A trade is triggered when all technical and quantitative indicators align:
+A trade is triggered when technical momentum and quantitative order flow align:
 
 ```
-Entry Signal = 15m ORB Breakout + VWAP Confirmation + Dual EMA Trend + PCR Filter
+Entry Signal = 15m ORB Breakout + VWAP Confirmation + Dual EMA Trend + Order Flow Conviction (>= 55/100)
 ```
 
 ### Bullish Call Entry (CE)
-1. **15m ORB:** Spot price crosses and closes above the 09:15–09:30 Opening High.
+1. **15m ORB:** Spot price crosses and closes above the 09:15–09:30 Opening High (with 0.05% buffer).
 2. **VWAP Confirmation:** Current spot is **above VWAP** and VWAP slope is positive ($> +0.05\%$).
 3. **EMA Alignment:** 9 EMA > 21 EMA on the 5-minute timeframe.
-4. **OI Confirmation:** PCR $\ge 0.90$ with Call OI unwinding or Put OI building up.
+4. **Order Flow Gate:** Institutional Conviction Score $\ge 55/100$ (PCR $\ge 0.90$, ATM Call writers retreating or Put writers loading support, Long Build-Up / Short Covering).
 5. **Cooldown Check:** No exit on this symbol within the last 15 minutes.
 
 ### Bearish Put Entry (PE)
-1. **15m ORB:** Spot price crosses and closes below the 09:15–09:30 Opening Low.
+1. **15m ORB:** Spot price crosses and closes below the 09:15–09:30 Opening Low (with 0.05% buffer).
 2. **VWAP Confirmation:** Current spot is **below VWAP** and VWAP slope is negative ($< -0.05\%$).
 3. **EMA Alignment:** 9 EMA < 21 EMA on the 5-minute timeframe.
-4. **OI Confirmation:** PCR $\le 1.10$ with Call OI building up or Put OI unwinding.
+4. **Order Flow Gate:** Institutional Conviction Score $\ge 55/100$ (PCR $\le 1.15$, ATM Put writers retreating or Call writers loading ceiling, Short Build-Up / Long Unwinding).
 5. **Cooldown Check:** No exit on this symbol within the last 15 minutes.
 
 ---
