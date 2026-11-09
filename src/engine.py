@@ -573,7 +573,7 @@ class TradingEngine:
                     }
 
         quote_line = " | ".join(quotes) if quotes else "Monitoring indices"
-        log.info(f"💓 [{now_str} IST] Market Active | Cash: ₹{cash:,.0f} | Open: {pos_count}/3 | P&L: ₹{pnl:+,.2f} | {quote_line}")
+        log.info(f"💓 [{now_str} IST] Market Active | Cash: ₹{cash:,.0f} | Open: {pos_count}/{self.risk_mgr.max_open_trades} | P&L: ₹{pnl:+,.2f} | {quote_line}")
 
         if pos_count > 0:
             for c_sym, p in self.broker.positions.items():
