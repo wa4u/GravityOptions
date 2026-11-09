@@ -14,7 +14,7 @@ import numpy as np
 try:
     from dhanhq import dhanhq, DhanContext
     DHAN_AVAILABLE = True
-except ImportError:
+except (ImportError, SyntaxError, Exception):
     DHAN_AVAILABLE = False
 
 from src.data.base_feed import BaseDataFeed, Candle, MarketTick

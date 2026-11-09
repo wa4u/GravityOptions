@@ -10,7 +10,6 @@ from src.utils.time_utils import (
 )
 from src.data.base_feed import BaseDataFeed, Candle
 from src.data.angel_feed import AngelOneFeed
-from src.data.dhan_feed import DhanFeed
 from src.data.mock_replay_feed import MockReplayFeed
 from src.data.instrument_manager import InstrumentManager
 from src.screener.index_screener import IndexScreener, IndexSignal
@@ -79,17 +78,21 @@ class TradingEngine:
 
         # 1. DhanHQ Broker Feed
         if broker_choice in ["dhan", "dhanhq"]:
-            dhan_creds = self.config.get("credentials", {}).get("dhan", {}) or self.config.get("dhan", {})
-            client_id = str(dhan_creds.get("client_id", "")).strip()
-            access_token = str(dhan_creds.get("access_token", "")).strip()
-            if client_id and "YOUR_" not in client_id and access_token:
-                feed = DhanFeed(client_id=client_id, access_token=access_token)
-                if feed.connect():
-                    self.telegram_notifier.notify_login_success(client_id=client_id, broker="DhanHQ")
-                    return feed
-                else:
-                    self.telegram_notifier.notify_login_failed(client_id=client_id, broker="DhanHQ", reason="DhanHQ token or client ID invalid")
+            try:
+                from src.data.dhan_feed import DhanFeed
+                dhan_creds = self.config.get("credentials", {}).get("dhan", {}) or self.config.get("dhan", {})
+                client_id = str(dhan_creds.get("client_id", "")).strip()
+                access_token = str(dhan_creds.get("access_token", "")).strip()
+                if client_id and "YOUR_" not in client_id and access_token:
+                    feed = DhanFeed(client_id=client_id, access_token=access_token)
+                    if feed.connect():
+                        self.telegram_notifier.notify_login_success(client_id=client_id, broker="DhanHQ")
+                        return feed
+                    else:
+                        self.telegram_notifier.notify_login_failed(client_id=client_id, broker="DhanHQ", reason="DhanHQ token or client ID invalid")
                 log.warning("DhanHQ connection failed. Falling back to Mock Replay Feed.")
+            except Exception as e:
+                log.error(f"Failed to load DhanFeed: {e}")
 
         # 2. Angel One Broker Feed
         creds = self.config.get("credentials", {}).get("angelone", {})
