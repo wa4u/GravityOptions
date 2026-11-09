@@ -80,7 +80,7 @@ indices:
 
 # Stock Options Screener & Universe Configuration
 stocks:
-  enabled: true              # Re-enabled with DhanHQ quality feed for extensive data collection
+  enabled: false             # Kept false for today on Angel One; will enable on Wednesday with DhanHQ
   scan_interval_seconds: 30  # Scan stock universe every 30 seconds
   # High-Beta Momentum F&O Runners + Core Large-caps
   universe:
