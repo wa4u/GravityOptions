@@ -3,6 +3,15 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Dict, List, Optional, Tuple, Any
 from src.utils.logger import log
+from src.utils.greeks import calculate_greeks
+
+LOT_SIZES: Dict[str, int] = {
+    "NIFTY": 25,
+    "BANKNIFTY": 15,
+    "SENSEX": 10,
+    "FINNIFTY": 25,
+    "MIDCPNIFTY": 50,
+}
 
 @dataclass
 class StrikeOIData:
@@ -23,6 +32,11 @@ class StrikeOIData:
     pe_ltp: float
     pe_net_change: float
     pe_buildup: str
+    ce_gamma: float = 0.0
+    pe_gamma: float = 0.0
+    call_gex: float = 0.0     # ₹ Cr per 1% move
+    put_gex: float = 0.0      # ₹ Cr per 1% move
+    net_gex: float = 0.0      # ₹ Cr per 1% move
 
 def classify_buildup(price_change: float, oi_change: int) -> str:
     """Classifies derivative state into the 4 institutional money-flow quadrants."""
@@ -63,6 +77,12 @@ class OIAnalysisResult:
     total_put_oi_change: int = 0
     conviction_score: int = 50            # 0 - 100 Institutional Conviction
     conviction_summary: str = ""
+    # Dealer Gamma Exposure (GEX) extensions (Option Hub / SpotGamma methodology)
+    total_call_gex: float = 0.0           # ₹ Cr per 1% move
+    total_put_gex: float = 0.0            # ₹ Cr per 1% move
+    total_net_gex: float = 0.0            # ₹ Cr per 1% move
+    gamma_regime: str = "NEUTRAL"         # "POSITIVE_GAMMA" (volatility dampener/chop) or "NEGATIVE_GAMMA" (breakout accelerator)
+    gamma_flip_level: Optional[float] = None # Price level where net GEX crosses 0
 
 class OIAnalyzer:
     """
@@ -74,6 +94,75 @@ class OIAnalyzer:
         self.instrument_mgr = instrument_mgr
         self.cache_ttl = cache_ttl
         self._cache: Dict[str, OIAnalysisResult] = {}
+
+    def calculate_gex_profile(
+        self,
+        symbol: str,
+        spot_price: float,
+        strikes_data: List[StrikeOIData],
+        lot_size: Optional[int] = None,
+        time_to_expiry_years: float = 3.0 / 365.0,
+        default_iv: float = 0.15
+    ) -> Tuple[float, float, float, str, Optional[float]]:
+        """
+        Calculates Dealer Gamma Exposure (GEX) across option chain strikes.
+        Returns: (total_call_gex, total_put_gex, total_net_gex, gamma_regime, gamma_flip_level)
+        Units: ₹ Crore per 1% move in spot price (Option Hub convention).
+        """
+        if not strikes_data or spot_price <= 0:
+            return 0.0, 0.0, 0.0, "NEUTRAL", None
+
+        ls = lot_size or LOT_SIZES.get(symbol.upper(), 25)
+        scale = (spot_price * spot_price * 0.01) / 1e7 # Spot^2 * 1% / 10^7 = ₹ Crore
+
+        tot_call_gex = 0.0
+        tot_put_gex = 0.0
+
+        for row in strikes_data:
+            k = row.strike
+            # Black-Scholes Greeks
+            ce_g = calculate_greeks(spot_price, k, time_to_expiry_years, default_iv, option_type="CE")
+            pe_g = calculate_greeks(spot_price, k, time_to_expiry_years, default_iv, option_type="PE")
+
+            row.ce_gamma = ce_g.get("gamma", 0.0)
+            row.pe_gamma = pe_g.get("gamma", 0.0)
+
+            # Call GEX: Dealer Long Call -> positive gamma
+            row.call_gex = 1.0 * row.ce_gamma * row.ce_oi * ls * scale
+            # Put GEX: Dealer Short Put -> negative gamma
+            row.put_gex = -1.0 * row.pe_gamma * row.pe_oi * ls * scale
+            row.net_gex = row.call_gex + row.put_gex
+
+            tot_call_gex += row.call_gex
+            tot_put_gex += row.put_gex
+
+        tot_net_gex = tot_call_gex + tot_put_gex
+
+        # Determine Gamma Regime
+        threshold = max(2.0, (spot_price / 10000.0) * 2.0)
+        if tot_net_gex > threshold:
+            regime = "POSITIVE_GAMMA"
+        elif tot_net_gex < -threshold:
+            regime = "NEGATIVE_GAMMA"
+        else:
+            regime = "NEUTRAL"
+
+        # Find Zero-Gamma Flip level
+        flip_level = None
+        sorted_rows = sorted(strikes_data, key=lambda r: r.strike)
+        for i, r in enumerate(sorted_rows):
+            if abs(r.net_gex) < 1e-3:
+                flip_level = r.strike
+                break
+            if i < len(sorted_rows) - 1:
+                r_next = sorted_rows[i + 1]
+                if (r.net_gex < 0 and r_next.net_gex > 0) or (r.net_gex > 0 and r_next.net_gex < 0):
+                    denom = r_next.net_gex - r.net_gex
+                    if abs(denom) > 1e-6:
+                        flip_level = r.strike + ((0.0 - r.net_gex) / denom) * (r_next.strike - r.strike)
+                        break
+
+        return round(tot_call_gex, 2), round(tot_put_gex, 2), round(tot_net_gex, 2), regime, (round(flip_level, 1) if flip_level else None)
 
     def analyze_symbol(
         self,
@@ -262,6 +351,11 @@ class OIAnalyzer:
         else:
             net_oi_flow = "NEUTRAL"
 
+        # GEX Calculation
+        tot_call_gex, tot_put_gex, tot_net_gex, gamma_regime, flip_level = self.calculate_gex_profile(
+            sym_upper, spot_price, strikes_data
+        )
+
         res = OIAnalysisResult(
             symbol=sym_upper,
             spot_price=spot_price,
@@ -284,7 +378,12 @@ class OIAnalyzer:
             atm_call_oi_change=atm_call_oi_change,
             atm_put_oi_change=atm_put_oi_change,
             total_call_oi_change=total_call_oi_change,
-            total_put_oi_change=total_put_oi_change
+            total_put_oi_change=total_put_oi_change,
+            total_call_gex=tot_call_gex,
+            total_put_gex=tot_put_gex,
+            total_net_gex=tot_net_gex,
+            gamma_regime=gamma_regime,
+            gamma_flip_level=flip_level
         )
 
         self._cache[sym_upper] = res
@@ -408,6 +507,11 @@ class OIAnalyzer:
         else:
             net_oi_flow = "NEUTRAL"
 
+        # GEX Calculation
+        tot_call_gex, tot_put_gex, tot_net_gex, gamma_regime, flip_level = self.calculate_gex_profile(
+            symbol, spot_price, strikes_data
+        )
+
         res = OIAnalysisResult(
             symbol=symbol,
             spot_price=spot_price,
@@ -430,7 +534,12 @@ class OIAnalyzer:
             atm_call_oi_change=atm_call_oi_change,
             atm_put_oi_change=atm_put_oi_change,
             total_call_oi_change=total_call_oi_change,
-            total_put_oi_change=total_put_oi_change
+            total_put_oi_change=total_put_oi_change,
+            total_call_gex=tot_call_gex,
+            total_put_gex=tot_put_gex,
+            total_net_gex=tot_net_gex,
+            gamma_regime=gamma_regime,
+            gamma_flip_level=flip_level
         )
         self._cache[symbol] = res
         return res
@@ -443,14 +552,17 @@ class OIAnalyzer:
         min_pcr_call: float = 0.90,
         max_pcr_put: float = 1.15,
         min_wall_dist: float = 25.0,
-        min_conviction_score: int = 55
+        min_conviction_score: int = 55,
+        participant_tracker: Optional[Any] = None
     ) -> Tuple[bool, str]:
         """
-        Validates breakout signals using the 4-Pillar Institutional Order Flow & Conviction Model:
+        Validates breakout signals using the Multi-Pillar Institutional Conviction Model (Option Hub):
         1. Put-Call Ratio (PCR) Institutional Sentiment (0 - 25 pts)
         2. ATM Strike Option Writer Dynamics (0 - 30 pts)
         3. Strike Build-Up Quadrant (0 - 25 pts)
         4. Wall Resistance / Support Clearance (0 - 20 pts)
+        5. Dealer Gamma Exposure (GEX) Regime (-10 to +15 pts)
+        6. Macro Institutional Participant Bias (NSE FII Tracker) (-10 to +15 pts)
         Total Score: 0 to 100. Requires >= min_conviction_score to open trade.
         """
         if not oi_result or not oi_result.is_valid:
@@ -592,6 +704,29 @@ class OIAnalyzer:
                 else:
                     score += 0
                     reasons.append(f"Near Put Wall Support ({dist:.0f} pts < {min_wall_dist:.0f})")
+
+        # Pillar 5: Dealer Gamma Exposure (GEX) & Volatility Regime (Option Hub model)
+        if oi_result.gamma_regime == "NEGATIVE_GAMMA":
+            score += 15
+            reasons.append(f"Negative Gamma Accelerator (Net GEX {oi_result.total_net_gex:+.1f} Cr)")
+        elif oi_result.gamma_regime == "POSITIVE_GAMMA":
+            score -= 10
+            reasons.append(f"Positive Gamma Pinning Chop Warning (Net GEX {oi_result.total_net_gex:+.1f} Cr)")
+
+        if oi_result.gamma_flip_level:
+            if is_call and spot_price > oi_result.gamma_flip_level:
+                score += 5
+                reasons.append(f"Above Gamma Flip (₹{oi_result.gamma_flip_level:,.0f})")
+            elif not is_call and spot_price < oi_result.gamma_flip_level:
+                score += 5
+                reasons.append(f"Below Gamma Flip (₹{oi_result.gamma_flip_level:,.0f})")
+
+        # Pillar 6: Macro Institutional Participant Bias (NSE FII Tracker)
+        if participant_tracker:
+            pt_mod, pt_reason = participant_tracker.get_bias_score_modifier(direction)
+            score += pt_mod
+            if pt_reason:
+                reasons.append(f"Macro Flow: {pt_reason} ({pt_mod:+,d} pts)")
 
         score = max(0, min(100, score))
         summary_text = " | ".join(reasons)

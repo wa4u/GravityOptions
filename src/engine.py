@@ -15,6 +15,7 @@ from src.data.instrument_manager import InstrumentManager
 from src.screener.index_screener import IndexScreener, IndexSignal
 from src.screener.stock_screener import StockScreener, StockSignal
 from src.data.oi_analyzer import OIAnalyzer, OIAnalysisResult
+from src.data.participant_tracker import ParticipantTracker
 from src.risk.risk_manager import RiskManager
 from src.execution.paper_broker import PaperBroker, Position
 from src.alerts.telegram_notifier import TelegramNotifier
@@ -59,6 +60,17 @@ class TradingEngine:
 
         oi_cache_ttl = self.config.get("oi_analysis", {}).get("cache_seconds", 60.0)
         self.oi_analyzer = OIAnalyzer(self.feed, self.instrument_mgr, cache_ttl=oi_cache_ttl)
+
+        self.participant_tracker = ParticipantTracker()
+        self.participant_data: Optional[Dict[str, Any]] = None
+        try:
+            self.participant_data = self.participant_tracker.get_latest_positioning()
+            if self.participant_data:
+                bias = self.participant_data.get("bias", "NEUTRAL")
+                reason = self.participant_data.get("bias_reason", "")
+                log.info(f"🏛️ [Participant Positioning] Macro Bias: {bias} | {reason}")
+        except Exception as e:
+            log.warning(f"Could not load participant positioning: {e}")
 
         self.running = False
         self.eod_summary_sent = False
@@ -261,7 +273,8 @@ class TradingEngine:
                             min_pcr_call=oi_cfg.get("min_pcr_for_call", 0.90),
                             max_pcr_put=oi_cfg.get("max_pcr_for_put", 1.15),
                             min_wall_dist=oi_cfg.get("min_distance_to_wall", 25.0),
-                            min_conviction_score=oi_cfg.get("min_conviction_score", 55)
+                            min_conviction_score=oi_cfg.get("min_conviction_score", 55),
+                            participant_tracker=self.participant_tracker
                         )
                         if not valid_oi:
                             log.info(f"🛡️ [Order Flow Filter] {symbol} {signal.direction} blocked: {oi_rsn}")
@@ -283,6 +296,9 @@ class TradingEngine:
                             "atm_put_buildup": getattr(oi_res, "atm_put_buildup", "NEUTRAL"),
                             "atm_call_oi_change": getattr(oi_res, "atm_call_oi_change", 0),
                             "atm_put_oi_change": getattr(oi_res, "atm_put_oi_change", 0),
+                            "gamma_regime": getattr(oi_res, "gamma_regime", "NEUTRAL"),
+                            "total_net_gex": getattr(oi_res, "total_net_gex", 0.0),
+                            "gamma_flip_level": getattr(oi_res, "gamma_flip_level", None),
                         }
 
                 opt_info = self.instrument_mgr.find_option_contract(symbol, signal.target_strike, signal.option_type)
@@ -558,7 +574,10 @@ class TradingEngine:
             if cfg.get("enabled", False):
                 ltp = self.feed.get_ltp(sym, cfg.get("exchange", "NSE"))
                 oi_res = self.oi_analyzer._cache.get(sym.upper())
-                pcr_str = f" [PCR:{oi_res.pcr:.2f}]" if (oi_res and oi_res.is_valid) else ""
+                pcr_str = ""
+                if oi_res and oi_res.is_valid:
+                    reg_tag = "POS" if oi_res.gamma_regime == "POSITIVE_GAMMA" else ("NEG" if oi_res.gamma_regime == "NEGATIVE_GAMMA" else "NEU")
+                    pcr_str = f" [PCR:{oi_res.pcr:.2f}|GEX:{reg_tag}]"
                 if ltp > 0:
                     quotes.append(f"{sym}: ₹{ltp:,.2f}{pcr_str}")
                 else:
@@ -569,7 +588,10 @@ class TradingEngine:
                         "sentiment": oi_res.sentiment,
                         "call_wall": oi_res.call_wall,
                         "put_wall": oi_res.put_wall,
-                        "max_pain": oi_res.max_pain
+                        "max_pain": oi_res.max_pain,
+                        "gamma_regime": getattr(oi_res, "gamma_regime", "NEUTRAL"),
+                        "total_net_gex": getattr(oi_res, "total_net_gex", 0.0),
+                        "gamma_flip": getattr(oi_res, "gamma_flip_level", None)
                     }
 
         quote_line = " | ".join(quotes) if quotes else "Monitoring indices"
