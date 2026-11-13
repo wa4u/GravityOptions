@@ -576,6 +576,12 @@ class TradingEngine:
             if cfg.get("enabled", False):
                 ltp = self.feed.get_ltp(sym, cfg.get("exchange", "NSE"))
                 oi_res = self.oi_analyzer._cache.get(sym.upper())
+                if not oi_res and ltp > 0:
+                    try:
+                        oi_res = self.oi_analyzer.analyze_symbol(sym.upper(), ltp, num_strikes=3)
+                    except Exception:
+                        pass
+
                 pcr_str = ""
                 if oi_res and oi_res.is_valid:
                     reg_tag = "POS" if oi_res.gamma_regime == "POSITIVE_GAMMA" else ("NEG" if oi_res.gamma_regime == "NEGATIVE_GAMMA" else "NEU")
