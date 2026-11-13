@@ -131,12 +131,34 @@ Inspired by institutional volume profiles and the 4-quadrant money flow model:
   - **Short Build-Up ($\downarrow$ Price, $\uparrow$ OI):** Institutions shorting / call writing $\rightarrow$ **High Conviction PE**.
   - **Short Covering ($\uparrow$ Price, $\downarrow$ OI):** Trapped bears covering shorts $\rightarrow$ Quick squeeze, prone to stall.
   - **Long Unwinding ($\downarrow$ Price, $\downarrow$ OI):** Bulls dumping losing longs $\rightarrow$ Fast liquidation, lacks aggressive sellers.
-- **The 4-Pillar Conviction Meter (0 to 100 Score):**
+- **The 6-Pillar Conviction Meter (0 to 100 Score):**
   1. **PCR Sentiment (Max 25 pts):** Measures baseline put/call writer participation.
   2. **ATM Strike Writer Dynamics (Max 30 pts):** Evaluates if Call sellers are retreating (-OI) or defending (+OI) at ATM, and if Put sellers are loading support (+OI).
   3. **Build-Up Quadrant (Max 25 pts):** Validates underlying/strike build-up alignment.
   4. **Wall Resistance/Support Clearance (Max 20 pts):** Ensures trade isn't slamming right into a Call/Put Wall.
-  - *Hard Gate:* Trades require $\ge 55/100$ Conviction to execute; low conviction traps are blocked.
+  5. **Dealer Gamma Exposure (GEX) Regime (-10 to +15 pts):** Evaluates whether dealers are in Negative Gamma (forced to hedge with momentum, accelerating breakouts) or Positive Gamma (absorbing moves, creating theta-burn chop).
+  6. **NSE Participant Positioning / FII Bias (-10 to +15 pts):** Checks daily closing FII net index futures long % and net contract direction to align with smart money institutional tides.
+  - *Hard Gate:* Trades require $\ge 55/100$ Conviction to execute; low conviction traps and choppy pinning regimes are blocked.
+
+### 3. Dealer Gamma Exposure (GEX) & Gamma Flip (Option Hub Engine)
+- **Net GEX Calculation:**
+  $$\text{Call GEX} = +1 \times \Gamma_{\text{call}} \times \text{Call OI} \times \text{lot\_size} \times \frac{S^2 \times 0.01}{10^7}\quad (₹\text{ Cr per 1\% move})$$
+  $$\text{Put GEX} = -1 \times \Gamma_{\text{put}} \times \text{Put OI} \times \text{lot\_size} \times \frac{S^2 \times 0.01}{10^7}\quad (₹\text{ Cr per 1\% move})$$
+  $$\text{Total Net GEX} = \sum_{\text{strikes}} (\text{Call GEX} + \text{Put GEX})$$
+- **Gamma Regimes:**
+  - **Negative Gamma ($\text{Net GEX} < 0$):** Market makers are short gamma. Delta-hedging forces them to buy as price rises and sell as price drops, triggering explosive, trending breakout cascades (prime territory for options buyers).
+  - **Positive Gamma ($\text{Net GEX} > 0$):** Market makers are long gamma. Hedging absorbs volatility by selling into rallies and buying into dips, causing price to mean-revert in tight chop (theta-decay trap).
+- **Gamma Flip Level ($S_{\text{flip}}$):** The exact price level where net GEX crosses zero. Crossing above or below the flip marks an intraday volatility regime transition.
+
+### 4. Daily NSE Participant Positioning Tracker (FII / DII / Pro / Retail)
+- Sources daily `fao_participant_oi_DDMMYYYY.csv` from NSE archives after market close.
+- **FII Index Futures Long %:**
+  $$\text{FII Long \%} = \frac{\text{FII Fut Long}}{\text{FII Fut Long} + \text{FII Fut Short}} \times 100$$
+  - $< 25\%$: Extreme FII short positioning $\rightarrow$ High potential for violent short-covering squeeze rallies.
+  - $> 75\%$: Crowded FII long positioning $\rightarrow$ Prone to long unwinding drops.
+- **FII Net Index Direction:**
+  $$\text{Net Direction} = (\text{Fut Long} - \text{Fut Short}) + (\text{Call Long} - \text{Call Short}) - (\text{Put Long} - \text{Put Short})$$
+- Provides a morning macro directional bias (`BULLISH`, `BEARISH`, `OVERSOLD_BOUNCE`, `NEUTRAL`) that informs the conviction score throughout the session.
 - **Call Wall & Put Wall Checks:**
   - **Call Wall (Highest Call OI):** Major resistance. Long CE trades entering right below the Call Wall are blocked.
   - **Put Wall (Highest Put OI):** Major support. Long PE trades entering right above the Put Wall are blocked.
