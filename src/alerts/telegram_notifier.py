@@ -54,7 +54,7 @@ class TelegramNotifier:
             log.error(f"Telegram error: {e}")
             return False
 
-    def notify_login_success(self, client_id: str, broker: str = "Angel One"):
+    def notify_login_success(self, client_id: str, broker: str = "Angel One", fii_bias: str = "", fii_reason: str = ""):
         if not self.toggles.get("login_success", True):
             return
         from src.utils.time_utils import get_now_ist
@@ -62,14 +62,22 @@ class TelegramNotifier:
         safe_client = html.escape(str(client_id))
         safe_broker = html.escape(str(broker))
 
+        fii_section = ""
+        if fii_bias:
+            fii_section = (
+                f"<b>🏛️ Macro FII Bias:</b> <code>{html.escape(fii_bias)}</code>\n"
+                f"<b>📊 Setup:</b> {html.escape(fii_reason)}\n"
+            )
+
         msg = (
-            f"<b>🔐 BROKER AUTHENTICATION SUCCESSFUL</b> 🟢\n"
+            f"<b>🔐 GRAVITYOPTIONS LIVE SESSION ACTIVE</b> 🟢\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"<b>Broker:</b> {safe_broker} SmartAPI\n"
             f"<b>Client ID:</b> <code>{safe_client}</code>\n"
-            f"<b>Status:</b> Connected and Session Active\n"
+            f"<b>Virtual Capital:</b> ₹200,000 (Max 8 trades)\n"
+            f"{fii_section}"
             f"<b>Time:</b> {now_str}\n"
-            f"<i>Live data feed, Open Interest analyzer, and risk engines are online and ready for trading.</i>"
+            f"<i>GEX & 6-Pillar Conviction Engine armed. Active breakout scanning starts at 09:30 IST.</i>"
         )
         self.send_message(msg)
 

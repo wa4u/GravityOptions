@@ -54,13 +54,6 @@ class TradingEngine:
             min_atr_pct=stk_cfg.get("min_atr_pct", 1.2)
         )
 
-        self.feed: BaseDataFeed = self._init_data_feed()
-        if hasattr(self.feed, "instrument_mgr"):
-            self.feed.instrument_mgr = self.instrument_mgr
-
-        oi_cache_ttl = self.config.get("oi_analysis", {}).get("cache_seconds", 60.0)
-        self.oi_analyzer = OIAnalyzer(self.feed, self.instrument_mgr, cache_ttl=oi_cache_ttl)
-
         self.participant_tracker = ParticipantTracker()
         self.participant_data: Optional[Dict[str, Any]] = None
         try:
@@ -71,6 +64,13 @@ class TradingEngine:
                 log.info(f"🏛️ [Participant Positioning] Macro Bias: {bias} | {reason}")
         except Exception as e:
             log.warning(f"Could not load participant positioning: {e}")
+
+        self.feed: BaseDataFeed = self._init_data_feed()
+        if hasattr(self.feed, "instrument_mgr"):
+            self.feed.instrument_mgr = self.instrument_mgr
+
+        oi_cache_ttl = self.config.get("oi_analysis", {}).get("cache_seconds", 60.0)
+        self.oi_analyzer = OIAnalyzer(self.feed, self.instrument_mgr, cache_ttl=oi_cache_ttl)
 
         self.running = False
         self.eod_summary_sent = False
@@ -117,7 +117,9 @@ class TradingEngine:
                 totp_secret=creds.get("totp_secret", "")
             )
             if feed.connect():
-                self.telegram_notifier.notify_login_success(client_id=client_id, broker="Angel One")
+                fii_b = self.participant_data.get("bias", "NEUTRAL") if self.participant_data else ""
+                fii_r = self.participant_data.get("bias_reason", "") if self.participant_data else ""
+                self.telegram_notifier.notify_login_success(client_id=client_id, broker="Angel One", fii_bias=fii_b, fii_reason=fii_r)
                 return feed
             else:
                 self.telegram_notifier.notify_login_failed(client_id=client_id, broker="Angel One", reason="SmartAPI authentication rejected or TOTP invalid")
