@@ -87,15 +87,18 @@ class RiskManager:
                 if len(sym_trades) >= self.max_trades_per_symbol:
                     return False, f"Daily limit for {sym_upper} reached ({len(sym_trades)}/{self.max_trades_per_symbol})"
 
-                # Halt symbol if 2 consecutive losses today
+                # Halt symbol if 2 consecutive hard losses today (e.g. Stop-Loss hits)
                 consecutive_losses = 0
                 for t in sym_trades:
-                    if float(t.get("net_pnl", 0)) < 0:
+                    reason = t.get("exit_reason", "")
+                    net_pnl = float(t.get("net_pnl", 0))
+                    # Only genuine stop-loss hits or significant losses (> -3%) count toward symbol halt
+                    if net_pnl < 0 and ("Stop-Loss" in reason or float(t.get("roi_pct", 0)) <= -3.0):
                         consecutive_losses += 1
-                    else:
+                    elif net_pnl >= 0:
                         break
                 if consecutive_losses >= 2:
-                    return False, f"{sym_upper} halted for today after {consecutive_losses} consecutive losses"
+                    return False, f"{sym_upper} halted for today after {consecutive_losses} consecutive stop-loss hits"
         except Exception as e:
             log.warning(f"Error checking daily trade limits: {e}")
 

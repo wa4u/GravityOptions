@@ -44,6 +44,7 @@ class IndexScreener:
         # Exponential Moving Averages
         df["ema_fast"] = df["close"].ewm(span=self.ema_fast, adjust=False).mean()
         df["ema_slow"] = df["close"].ewm(span=self.ema_slow, adjust=False).mean()
+        df["ema_50"] = df["close"].ewm(span=min(50, len(df)), adjust=False).mean()
 
         # Intraday VWAP: Calculate strictly on today's session (or latest day in dataset)
         df["date_only"] = df["timestamp"].apply(lambda x: x.date() if hasattr(x, "date") else x)
@@ -134,9 +135,17 @@ class IndexScreener:
         current_close = eval_row["close"]
         current_open = eval_row["open"]
         prev_close = prev_row["close"]
+        prev_high = prev_row["high"]
+        prev_low = prev_row["low"]
         vwap = eval_row["vwap"]
         ema_f = eval_row["ema_fast"]
         ema_s = eval_row["ema_slow"]
+        ema_50 = eval_row.get("ema_50", current_close)
+
+        # Higher Timeframe Trend Filter (HTF Gate)
+        # Protects against buying Puts in a bull market or Calls in a bear market
+        is_htf_bullish = current_close >= ema_50 and ema_f >= ema_s and current_close >= vwap
+        is_htf_bearish = current_close <= ema_50 and ema_f <= ema_s and current_close <= vwap
 
         # Small 0.05% buffer (~12 pts Nifty / ~28 pts Bank Nifty) to eliminate false wick sweeps
         buffer = 0.0005
@@ -144,9 +153,12 @@ class IndexScreener:
         # Base ATM strike rounded to nearest step
         atm_strike = round(round(current_close / strike_step) * strike_step, 1)
 
-        # Bullish Breakout: Decisive closed green candle above today's ORB High, above VWAP, EMA Bullish
-        if (current_close > (orb_high * (1.0 + buffer)) and prev_close <= orb_high and 
-            current_close > current_open and current_close > vwap and ema_f > ema_s):
+        # Bullish Breakout: 
+        # Initial cross OR continuation expansion, strictly non-bearish HTF, above VWAP, EMA Bullish
+        if (current_close > (orb_high * (1.0 + buffer)) and 
+            (prev_close <= orb_high or current_close > prev_high) and 
+            current_close > current_open and current_close > vwap and ema_f > ema_s and 
+            not is_htf_bearish):
             
             # Strike Selection: Deep ITM (ITM 2, Delta ~0.75) vs ATM (Delta ~0.50)
             if strike_mode.lower() == "deep_itm":
@@ -158,7 +170,7 @@ class IndexScreener:
                 delta_est = 0.55
                 depth_label = "ATM"
 
-            reason = f"Bullish Breakout: Closed Bar > ORB High ₹{orb_high:.1f} | Close > VWAP ₹{vwap:.1f} | EMA Bullish ({depth_label})"
+            reason = f"Bullish Breakout: Closed Bar > ORB High ₹{orb_high:.1f} | Close > VWAP ₹{vwap:.1f} | HTF Trend Bullish ({depth_label})"
             return IndexSignal(
                 symbol=symbol,
                 direction="BUY_CALL",
@@ -169,9 +181,12 @@ class IndexScreener:
                 delta_estimate=delta_est
             )
 
-        # Bearish Breakdown: Decisive closed red candle below today's ORB Low, below VWAP, EMA Bearish
-        elif (current_close < (orb_low * (1.0 - buffer)) and prev_close >= orb_low and 
-              current_close < current_open and current_close < vwap and ema_f < ema_s):
+        # Bearish Breakdown:
+        # Initial cross OR continuation expansion, strictly non-bullish HTF, below VWAP, EMA Bearish
+        elif (current_close < (orb_low * (1.0 - buffer)) and 
+              (prev_close >= orb_low or current_close < prev_low) and 
+              current_close < current_open and current_close < vwap and ema_f < ema_s and 
+              not is_htf_bullish):
             
             # Strike Selection: Deep ITM (ITM 2, Delta ~ -0.75) vs ATM (Delta ~ -0.50)
             if strike_mode.lower() == "deep_itm":
@@ -183,7 +198,7 @@ class IndexScreener:
                 delta_est = -0.55
                 depth_label = "ATM"
 
-            reason = f"Bearish Breakdown: Closed Bar < ORB Low ₹{orb_low:.1f} | Close < VWAP ₹{vwap:.1f} | EMA Bearish ({depth_label})"
+            reason = f"Bearish Breakdown: Closed Bar < ORB Low ₹{orb_low:.1f} | Close < VWAP ₹{vwap:.1f} | HTF Trend Bearish ({depth_label})"
             return IndexSignal(
                 symbol=symbol,
                 direction="BUY_PUT",

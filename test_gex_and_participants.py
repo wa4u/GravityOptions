@@ -25,7 +25,7 @@ Total,381905,381905,8332410,8332410,5909550,5555006,5909550,5555006,3027535,2183
     parsed = tracker._parse_nse_csv(sample_csv, "2026-11-12")
     assert parsed is not None
     assert parsed["report_date"] == "2026-11-12"
-    assert parsed["bias"] == "BEARISH"
+    assert parsed["bias"] == "MILD_BEARISH"
 
     fii = parsed["participants"]["FII"]
     assert fii["fut_long_pct"] == 37.0
@@ -33,13 +33,13 @@ Total,381905,381905,8332410,8332410,5909550,5555006,5909550,5555006,3027535,2183
 
     tracker.data = parsed
 
-    # Test modifiers
+    # Test modifiers (37% is Mild Short: gives +6 to PE and 0 penalty to CE)
     pe_mod, pe_reason = tracker.get_bias_score_modifier("BUY_PUT")
-    assert pe_mod == 10
+    assert pe_mod == 6
     print(f"  PE Alignment Modifier: {pe_mod:+} pts ({pe_reason})")
 
     ce_mod, ce_reason = tracker.get_bias_score_modifier("BUY_CALL")
-    assert ce_mod == -10
+    assert ce_mod == 0
     print(f"  CE Headwind Modifier: {ce_mod:+} pts ({ce_reason})")
     print("✅ Participant Tracker tests passed!")
 
@@ -133,7 +133,7 @@ def test_gex_and_fii_conviction_integration():
     assert valid is True
     assert bearish_oi.conviction_score >= 85
     assert "Negative Gamma Accelerator" in reason
-    assert "FII Bearish Institutional Alignment" in reason
+    assert "Short Alignment" in reason
 
     # Case B: Bullish Breakout Attempt blocked by Positive Gamma Pinning & FII Short Headwinds
     bullish_choppy_oi = OIAnalysisResult(

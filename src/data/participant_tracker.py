@@ -169,36 +169,40 @@ class ParticipantTracker:
                 "net_direction": net_direction
             }
 
-        # Calculate macro institutional bias
+        # Calculate macro institutional bias based on Index Futures Long % (Pure Speculative Direction)
+        # In Indian markets, FIIs always carry massive static Put hedges for their ₹20+ Lakh Cr equity holdings,
+        # so total net direction is perpetually negative. Speculative directional bias must rely on Futures Long %.
         fii = participants.get("FII")
-        client = participants.get("CLIENT")
 
         bias = "NEUTRAL"
         bias_reason = "Balanced FII positioning"
 
         if fii:
             fii_long_pct = fii["fut_long_pct"]
-            fii_dir = fii["net_direction"]
+            fii_net_fut = fii["net_futures"]
 
-            if fii_long_pct < 25.0:
+            if fii_long_pct < 20.0:
                 # Extreme FII oversold / short trap -> High potential for violent CE short-covering
                 bias = "OVERSOLD_BOUNCE"
-                bias_reason = f"FII Index Futures Extreme Short ({fii_long_pct:.1f}% Long, Net: {fii_dir:+,d}) -> Prone to Short Squeeze"
+                bias_reason = f"FII Index Futures Extreme Short ({fii_long_pct:.1f}% Long, Net: {fii_net_fut:+,d}) -> Prone to Short Squeeze"
             elif fii_long_pct > 75.0:
                 bias = "OVERBOUGHT_CORRECTION"
-                bias_reason = f"FII Index Futures Crowded Long ({fii_long_pct:.1f}% Long, Net: {fii_dir:+,d}) -> Prone to Long Unwinding"
-            elif fii_dir < -200000:
-                bias = "BEARISH"
-                bias_reason = f"FII Heavy Net Short ({fii_dir:+,d} contracts, {fii_long_pct:.1f}% Fut Long)"
-            elif fii_dir > 200000:
+                bias_reason = f"FII Index Futures Crowded Long ({fii_long_pct:.1f}% Long, Net: {fii_net_fut:+,d}) -> Prone to Long Unwinding"
+            elif fii_long_pct >= 58.0:
                 bias = "BULLISH"
-                bias_reason = f"FII Heavy Net Long ({fii_dir:+,d} contracts, {fii_long_pct:.1f}% Fut Long)"
-            elif fii_long_pct < 45.0:
-                bias = "MILD_BEARISH"
-                bias_reason = f"FII Moderate Short Bias ({fii_long_pct:.1f}% Fut Long)"
-            elif fii_long_pct > 55.0:
+                bias_reason = f"FII Dominant Long Futures ({fii_long_pct:.1f}% Long, Net: {fii_net_fut:+,d})"
+            elif fii_long_pct <= 32.0:
+                bias = "BEARISH"
+                bias_reason = f"FII Heavy Short Futures ({fii_long_pct:.1f}% Long, Net: {fii_net_fut:+,d})"
+            elif fii_long_pct >= 52.0:
                 bias = "MILD_BULLISH"
-                bias_reason = f"FII Moderate Long Bias ({fii_long_pct:.1f}% Fut Long)"
+                bias_reason = f"FII Mild Long Bias ({fii_long_pct:.1f}% Long, Net: {fii_net_fut:+,d})"
+            elif fii_long_pct <= 42.0:
+                bias = "MILD_BEARISH"
+                bias_reason = f"FII Mild Short Bias ({fii_long_pct:.1f}% Long, Net: {fii_net_fut:+,d})"
+            else:
+                bias = "NEUTRAL"
+                bias_reason = f"FII Balanced Positioning ({fii_long_pct:.1f}% Long, Net: {fii_net_fut:+,d})"
 
         return {
             "report_date": report_date,
@@ -220,21 +224,29 @@ class ParticipantTracker:
         fii_long_pct = fii.get("fut_long_pct", 50.0)
 
         if is_call:
-            if bias in ["BULLISH", "MILD_BULLISH"]:
-                return 10, f"FII Bullish Tailwinds ({fii_long_pct:.1f}% Long)"
+            if bias == "BULLISH":
+                return 12, f"FII Dominant Bullish Tailwinds ({fii_long_pct:.1f}% Long)"
+            elif bias == "MILD_BULLISH":
+                return 6, f"FII Mild Long Tailwinds ({fii_long_pct:.1f}% Long)"
             elif bias == "OVERSOLD_BOUNCE":
                 return 15, f"FII Extreme Short Squeeze Potential ({fii_long_pct:.1f}% Long)"
             elif bias == "BEARISH":
                 return -10, f"FII Heavy Short Headwinds ({fii_long_pct:.1f}% Long)"
+            elif bias == "MILD_BEARISH":
+                return 0, f"FII Mild Short Bias ({fii_long_pct:.1f}% Long)"
             elif bias == "OVERBOUGHT_CORRECTION":
                 return -10, f"FII Crowded Long Danger ({fii_long_pct:.1f}% Long)"
             return 0, "Neutral FII Positioning"
         else:
             # PE trades
-            if bias in ["BEARISH", "MILD_BEARISH"]:
-                return 10, f"FII Bearish Institutional Alignment ({fii_long_pct:.1f}% Long)"
+            if bias == "BEARISH":
+                return 12, f"FII Dominant Short Alignment ({fii_long_pct:.1f}% Long)"
+            elif bias == "MILD_BEARISH":
+                return 6, f"FII Mild Short Alignment ({fii_long_pct:.1f}% Long)"
             elif bias == "OVERBOUGHT_CORRECTION":
                 return 15, f"FII Long Unwinding Tailwinds ({fii_long_pct:.1f}% Long)"
             elif bias in ["BULLISH", "OVERSOLD_BOUNCE"]:
                 return -10, f"FII Bullish Headwinds ({fii_long_pct:.1f}% Long)"
+            elif bias == "MILD_BULLISH":
+                return 0, f"FII Mild Long Bias ({fii_long_pct:.1f}% Long)"
             return 0, "Neutral FII Positioning"

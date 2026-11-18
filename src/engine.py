@@ -78,6 +78,7 @@ class TradingEngine:
         self.last_stock_scan_time = 0.0
         self.circuit_breaker_triggered = False
         self.cooldowns: Dict[str, datetime] = {}
+        self.stagnation_lockouts: Dict[str, datetime] = {}
         self.candle_interval = self.config.get("system", {}).get("candle_interval", "5m")
         self.cooldown_mins = self.config.get("system", {}).get("trade_cooldown_mins", 15)
 
@@ -188,7 +189,9 @@ class TradingEngine:
                 record = self.broker.sell_option(contract, current_price, reason="Anti-Theta Stagnation Exit")
                 if record:
                     self.cooldowns[pos.symbol] = now + timedelta(minutes=self.cooldown_mins)
+                    self.stagnation_lockouts[pos.symbol] = now + timedelta(minutes=45)
                     log.info(f"⏳ Cooldown activated: No new trades on {pos.symbol} for {self.cooldown_mins} minutes.")
+                    log.info(f"⏸️ [Stagnation Lockout] {pos.symbol} locked for 45 minutes to prevent re-entering horizontal chop.")
                     self.telegram_notifier.notify_order_exit(record.__dict__)
                     self._export_live_web_report()
                 continue
@@ -239,6 +242,9 @@ class TradingEngine:
                 continue
 
             if symbol in self.cooldowns and now < self.cooldowns[symbol]:
+                continue
+
+            if symbol in self.stagnation_lockouts and now < self.stagnation_lockouts[symbol]:
                 continue
 
             can_trade, reason = self.risk_mgr.can_open_new_trade(self.broker, symbol=symbol)
@@ -393,6 +399,9 @@ class TradingEngine:
         universe = stk_cfg.get("universe", [])
         for symbol in universe:
             if symbol in self.cooldowns and now < self.cooldowns[symbol]:
+                continue
+
+            if symbol in self.stagnation_lockouts and now < self.stagnation_lockouts[symbol]:
                 continue
 
             can_trade, reason = self.risk_mgr.can_open_new_trade(self.broker, symbol=symbol)
