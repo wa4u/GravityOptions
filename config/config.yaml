@@ -113,6 +113,13 @@ stocks:
     min_profit_pct: 15.0     # Must be in >= 15% profit to carry overnight
     min_days_to_expiry: 7    # Avoid carry forward in expiry week (physical delivery risk)
 
+# Market Regime & Volatility Filters (ADX Trend vs Non-Trending Chop Protection)
+market_regime:
+  adx_period: 14             # Welles Wilder 14-period ADX
+  min_adx: 22.0              # Strict gate: ADX < 22 = Stand-down (No option buying in chop)
+  check_di_alignment: true   # Require +DI > -DI for Call options, -DI > +DI for Put options
+  multi_day_range_filter: true # Block breakouts inside middle of multi-day range box when ADX < 25
+
 # Open Interest (OI) & Institutional Order Flow Conviction Gate (MrChartist Model)
 oi_analysis:
   enabled: true

@@ -172,6 +172,53 @@ def run_tests():
     })
     print("  ✅ Telegram Alert Formatting: PASSED")
 
+    # 8. Test Index Screener ADX Regime & Chop Gate
+    print("\n[TEST 8] Index Screener ADX Regime & Multi-Day Chop Filter...")
+    from src.utils.time_utils import get_now_ist
+    now_ist = get_now_ist()
+    test_date = now_ist.date()
+
+    idx_screener = IndexScreener(min_adx=22.0)
+
+    # Scenario A: Choppy Range (ADX < 22) -> Breakout blocked!
+    # Construct 30 candles of low-volatility sideways chop between 25,180 and 25,220
+    chop_candles = []
+    base_t = now_ist.replace(hour=9, minute=15, second=0, microsecond=0)
+    for i in range(25):
+        t = base_t + timedelta(minutes=i * 5)
+        # Alternate prices in tight 10 pt range
+        p = 25200.0 + (5.0 if i % 2 == 0 else -5.0)
+        chop_candles.append(Candle("NIFTY", t, p, p + 8.0, p - 8.0, p + 2.0, 50000))
+
+    # Add a candle that wicks below ORB low (25192.0)
+    last_t = base_t + timedelta(minutes=25 * 5)
+    chop_candles.append(Candle("NIFTY", last_t, 25195.0, 25198.0, 25180.0, 25182.0, 60000))
+
+    sig_chop = idx_screener.evaluate_orb_setup("NIFTY", chop_candles, eval_date=test_date)
+    assert sig_chop is None, "Choppy regime (ADX < 22) MUST block option buying!"
+    print("  • Choppy Market (ADX < 22): Option Buy successfully BLOCKED (Preserved Capital)")
+
+    # Scenario B: Strong Bullish Trend Expansion (ADX > 25, +DI > -DI) -> Breakout Approved!
+    trend_candles = []
+    for i in range(25):
+        t = base_t + timedelta(minutes=i * 5)
+        # Steady trending march upwards (25,000 -> 25,350)
+        p = 25000.0 + (i * 12.0)
+        trend_candles.append(Candle("NIFTY", t, p - 2.0, p + 10.0, p - 4.0, p + 8.0, 80000))
+
+    # Breakout candle accelerating above ORB high with strong volume
+    t_breakout = base_t + timedelta(minutes=25 * 5)
+    p_last = 25000.0 + (25 * 12.0)
+    trend_candles.append(Candle("NIFTY", t_breakout, p_last, p_last + 25.0, p_last - 2.0, p_last + 22.0, 150000))
+
+    sig_trend = idx_screener.evaluate_orb_setup("NIFTY", trend_candles, eval_date=test_date)
+    assert sig_trend is not None, "Strong trend with ADX >= 22 MUST approve valid breakout!"
+    assert sig_trend.direction == "BUY_CALL", "Direction should be BUY_CALL"
+    assert sig_trend.adx >= 22.0, f"ADX should be >= 22.0, got {sig_trend.adx}"
+    print(f"  • Trending Market (ADX {sig_trend.adx:.1f} >= 22.0): {sig_trend.direction} APPROVED")
+    print(f"  • Trigger Reason: {sig_trend.trigger_reason}")
+    print("  ✅ Index Screener ADX & Chop Filter: PASSED")
+
     print("\n" + "=" * 65)
     print("🎉 ALL TESTS COMPLETED SUCCESSFULLY! SYSTEM READY FOR PAPER TRADING.")
     print("=" * 65)

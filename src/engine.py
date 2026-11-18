@@ -47,7 +47,12 @@ class TradingEngine:
             slippage_points=sim_cfg.get("slippage_points", 0.5)
         )
 
-        self.index_screener = IndexScreener()
+        regime_cfg = self.config.get("market_regime", {})
+        self.index_screener = IndexScreener(
+            adx_period=regime_cfg.get("adx_period", 14),
+            min_adx=regime_cfg.get("min_adx", 22.0),
+            enable_multi_day_filter=regime_cfg.get("multi_day_range_filter", True)
+        )
         stk_cfg = self.config.get("stocks", {})
         self.stock_screener = StockScreener(
             min_rvol=stk_cfg.get("min_rvol", 1.8),
@@ -251,7 +256,7 @@ class TradingEngine:
             if not can_trade:
                 continue
 
-            candles = self.feed.get_historical_candles(symbol, symbol, interval=self.candle_interval, count=40)
+            candles = self.feed.get_historical_candles(symbol, symbol, interval=self.candle_interval, count=150)
             if not candles:
                 continue
 
@@ -260,7 +265,8 @@ class TradingEngine:
                 candles=candles,
                 strike_step=cfg.get("strike_step", 50),
                 strike_mode=cfg.get("strike_mode", "deep_itm"),
-                itm_depth=cfg.get("itm_depth", 2)
+                itm_depth=cfg.get("itm_depth", 2),
+                min_adx=cfg.get("min_adx", None)
             )
 
             if signal:
@@ -408,7 +414,7 @@ class TradingEngine:
             if not can_trade:
                 continue
 
-            candles = self.feed.get_historical_candles(symbol, symbol, interval=self.candle_interval, count=40)
+            candles = self.feed.get_historical_candles(symbol, symbol, interval=self.candle_interval, count=100)
             if not candles:
                 continue
 
