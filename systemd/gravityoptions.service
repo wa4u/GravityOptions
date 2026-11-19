@@ -1,0 +1,16 @@
+[Unit]
+Description=GravityOptions Automated Options Buying Bot Supervisor
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/gravitywork/GravityOptions
+ExecStart=/home/gravitywork/GravityOptions/venv/bin/python /home/gravitywork/GravityOptions/start_market_session.py --loop
+Restart=always
+RestartSec=15
+StandardOutput=append:/home/gravitywork/GravityOptions/supervisor.log
+StandardError=append:/home/gravitywork/GravityOptions/supervisor.log
+
+[Install]
+WantedBy=multi-user.target
