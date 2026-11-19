@@ -37,6 +37,14 @@ class IndexScreener:
         self.adx_period = adx_period
         self.min_adx = min_adx
         self.enable_multi_day_filter = enable_multi_day_filter
+        self._last_log_time: Dict[str, float] = {}
+
+    def _log_throttled(self, key: str, message: str, cooldown_secs: float = 60.0):
+        import time
+        now_ts = time.time()
+        if now_ts - self._last_log_time.get(key, 0.0) >= cooldown_secs:
+            log.info(message)
+            self._last_log_time[key] = now_ts
 
     def calculate_indicators(self, candles: List[Candle]) -> pd.DataFrame:
         if len(candles) < 5:
@@ -211,13 +219,14 @@ class IndexScreener:
         # Bullish Breakout: 
         # Initial cross OR continuation expansion, strictly non-bearish HTF, above VWAP, EMA Bullish
         if (current_close > (orb_high * (1.0 + buffer)) and 
-            (prev_close <= orb_high or current_close > prev_high) and 
+            (prev_close <= orb_high or current_close >= prev_close) and 
             current_close > current_open and current_close > vwap and ema_f > ema_s and 
             not is_htf_bearish):
 
             # Gate 1: ADX Trend vs Non-Trending Chop Filter
             if adx_val < eff_min_adx:
-                log.info(
+                self._log_throttled(
+                    f"{symbol}_standdown",
                     f"🛡️ [Regime Stand-Down] {symbol} BUY_CALL blocked: "
                     f"Non-Trending Chop Regime (ADX {adx_val:.1f} < {eff_min_adx:.1f}) | Options Buying Suspended"
                 )
@@ -225,7 +234,8 @@ class IndexScreener:
 
             # Gate 2: Directional Movement Alignment (+DI must dominate -DI)
             if plus_di <= minus_di:
-                log.info(
+                self._log_throttled(
+                    f"{symbol}_di_gate",
                     f"🛡️ [Regime Stand-Down] {symbol} BUY_CALL blocked: "
                     f"Negative Directional Bias Dominates (+DI {plus_di:.1f} <= -DI {minus_di:.1f})"
                 )
@@ -238,7 +248,8 @@ class IndexScreener:
                     range_pos = (current_close - multi_day_low) / range_span
                     # If price is trapped in the middle of multi-day chop box (25% to 75%) without strong trend breakout (ADX < 25)
                     if 0.25 <= range_pos <= 0.75 and adx_val < 25.0:
-                        log.info(
+                        self._log_throttled(
+                            f"{symbol}_range_gate",
                             f"🛡️ [Range Gate] {symbol} BUY_CALL blocked: "
                             f"Trapped in Multi-Day Range [₹{multi_day_low:.0f} - ₹{multi_day_high:.0f}] "
                             f"({range_pos*100:.0f}% of box, ADX {adx_val:.1f} < 25.0) | Awaiting True Expansion"
@@ -273,13 +284,14 @@ class IndexScreener:
         # Bearish Breakdown:
         # Initial cross OR continuation expansion, strictly non-bullish HTF, below VWAP, EMA Bearish
         elif (current_close < (orb_low * (1.0 - buffer)) and 
-              (prev_close >= orb_low or current_close < prev_low) and 
+              (prev_close >= orb_low or current_close <= prev_close) and 
               current_close < current_open and current_close < vwap and ema_f < ema_s and 
               not is_htf_bullish):
 
             # Gate 1: ADX Trend vs Non-Trending Chop Filter
             if adx_val < eff_min_adx:
-                log.info(
+                self._log_throttled(
+                    f"{symbol}_standdown",
                     f"🛡️ [Regime Stand-Down] {symbol} BUY_PUT blocked: "
                     f"Non-Trending Chop Regime (ADX {adx_val:.1f} < {eff_min_adx:.1f}) | Options Buying Suspended"
                 )
@@ -287,7 +299,8 @@ class IndexScreener:
 
             # Gate 2: Directional Movement Alignment (-DI must dominate +DI)
             if minus_di <= plus_di:
-                log.info(
+                self._log_throttled(
+                    f"{symbol}_di_gate",
                     f"🛡️ [Regime Stand-Down] {symbol} BUY_PUT blocked: "
                     f"Positive Directional Bias Dominates (-DI {minus_di:.1f} <= +DI {plus_di:.1f})"
                 )
@@ -300,7 +313,8 @@ class IndexScreener:
                     range_pos = (current_close - multi_day_low) / range_span
                     # If price is trapped in the middle of multi-day chop box (25% to 75%) without strong trend breakdown (ADX < 25)
                     if 0.25 <= range_pos <= 0.75 and adx_val < 25.0:
-                        log.info(
+                        self._log_throttled(
+                            f"{symbol}_range_gate",
                             f"🛡️ [Range Gate] {symbol} BUY_PUT blocked: "
                             f"Trapped in Multi-Day Range [₹{multi_day_low:.0f} - ₹{multi_day_high:.0f}] "
                             f"({range_pos*100:.0f}% of box, ADX {adx_val:.1f} < 25.0) | Awaiting True Expansion"
