@@ -24,10 +24,17 @@ class RiskManager:
         self.max_daily_trades = self.risk_cfg.get("max_daily_trades", 5)
         self.max_trades_per_symbol = self.risk_cfg.get("max_trades_per_symbol", 2)
         self.default_sl_pct = self.risk_cfg.get("stop_loss_pct", 15.0)
-        self.default_tp_pct = self.risk_cfg.get("target_profit_pct", 35.0)
-        self.trail_trigger_pct = self.risk_cfg.get("trail_sl_trigger_pct", 15.0)
-        self.trail_step_pct = self.risk_cfg.get("trail_step_pct", 10.0)
+        self.default_tp_pct = self.risk_cfg.get("target_profit_pct", 25.0)
+        self.trail_trigger_pct = self.risk_cfg.get("trail_sl_trigger_pct", 12.0)
+        self.trail_step_pct = self.risk_cfg.get("trail_step_pct", 8.0)
         self.stagnation_timeout_mins = config.get("system", {}).get("stagnation_timeout_mins", 20)
+
+        # High-Watermark Peak Profit Protection
+        peak_cfg = self.risk_cfg.get("peak_protect", {})
+        self.peak_protect_enabled = peak_cfg.get("enabled", True)
+        self.peak_trigger_pct = peak_cfg.get("trigger_pct", 18.0)
+        self.peak_lock_in_min_pct = peak_cfg.get("lock_in_min_pct", 10.0)
+        self.peak_giveback_pct = peak_cfg.get("giveback_pct", 7.0)
         
         self.is_circuit_broken = False
         self.circuit_break_reason = ""
@@ -137,22 +144,42 @@ class RiskManager:
     def evaluate_trailing_stop(self, pos: Position, current_price: float) -> Optional[float]:
         """
         Check if stop-loss should be trailed higher.
+        Supports both High-Watermark Peak-Protect Trailing and classic step trailing.
         Returns new_sl if trailed, else None.
         """
-        gain_pct = ((current_price - pos.entry_price) / pos.entry_price) * 100.0
-        
-        # Level 1: At +15% profit, lock in Breakeven (+1%)
-        if pos.trailing_level == 0 and gain_pct >= self.trail_trigger_pct:
-            new_sl = round(pos.entry_price * 1.01, 2)
+        # Ensure highest_price is at least current_price or entry_price
+        if getattr(pos, "highest_price", 0.0) < current_price:
+            pos.highest_price = current_price
+
+        current_gain_pct = ((current_price - pos.entry_price) / pos.entry_price) * 100.0
+        peak_gain_pct = ((pos.highest_price - pos.entry_price) / pos.entry_price) * 100.0
+
+        # Mode A: Peak-Protect Trailing (when enabled)
+        # Protects floating windfall gains from being wiped out by a sudden red candle flush
+        if self.peak_protect_enabled and peak_gain_pct >= self.peak_trigger_pct:
+            # Trailing stop calculated from the peak high-watermark price
+            peak_sl = round(pos.highest_price * (1.0 - self.peak_giveback_pct / 100.0), 2)
+            # Guarantee minimum locked-in profit floor
+            min_lock_sl = round(pos.entry_price * (1.0 + self.peak_lock_in_min_pct / 100.0), 2)
+            target_sl = max(peak_sl, min_lock_sl)
+
+            if target_sl > pos.stop_loss:
+                pos.trailing_level = 2
+                pos.stop_loss = target_sl
+                return target_sl
+
+        # Mode B: Level 1 Breakeven Trailing (+1.5% profit buffer to cover statutory fees)
+        if pos.trailing_level == 0 and current_gain_pct >= self.trail_trigger_pct:
+            new_sl = round(pos.entry_price * 1.015, 2)
             if new_sl > pos.stop_loss:
                 pos.trailing_level = 1
                 pos.stop_loss = new_sl
                 return new_sl
 
-        # Level 2+: Trail by steps
-        elif pos.trailing_level >= 1:
+        # Mode C: Classic Multi-Step Trailing (fallback when peak_protect is disabled)
+        elif not self.peak_protect_enabled and pos.trailing_level >= 1:
             threshold = self.trail_trigger_pct + (pos.trailing_level * self.trail_step_pct)
-            if gain_pct >= threshold:
+            if current_gain_pct >= threshold:
                 lock_in_pct = threshold - self.trail_step_pct
                 new_sl = round(pos.entry_price * (1.0 + lock_in_pct / 100.0), 2)
                 if new_sl > pos.stop_loss:

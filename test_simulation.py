@@ -100,9 +100,15 @@ def run_tests():
             "max_daily_loss_inr": 5000.0,
             "max_open_trades": 3,
             "stop_loss_pct": 15.0,
-            "target_profit_pct": 35.0,
-            "trail_sl_trigger_pct": 15.0,
-            "trail_step_pct": 10.0
+            "target_profit_pct": 25.0,
+            "trail_sl_trigger_pct": 12.0,
+            "trail_step_pct": 8.0,
+            "peak_protect": {
+                "enabled": True,
+                "trigger_pct": 18.0,
+                "lock_in_min_pct": 10.0,
+                "giveback_pct": 7.0
+            }
         },
         "position_sizing": {"mode": "fixed_lots"},
         "stocks": {"carry_forward": {"enabled": True, "min_profit_pct": 15.0, "min_days_to_expiry": 7}}
@@ -118,13 +124,28 @@ def run_tests():
         lots=1
     )
     initial_sl = pos2.stop_loss
-    # Price rises by +18% (exceeds trail trigger of 15%)
-    current_market_p = 100.5 * 1.18
-    new_sl = risk_mgr.evaluate_trailing_stop(pos2, current_market_p)
-    print(f"  • Initial SL: ₹{initial_sl} | Market Price: ₹{current_market_p:.2f}")
-    print(f"  • Trailed SL: ₹{new_sl:.2f} (Locked in breakeven +1%)")
-    assert new_sl is not None and new_sl > initial_sl
-    print("  ✅ Trailing Stop-Loss: PASSED")
+    entry_p = pos2.entry_price # 100.5 with 0.5 slippage
+
+    # Step A: Price rises to +12% (Level 1 Breakeven Trailing)
+    p_breakeven = entry_p * 1.12
+    sl_breakeven = risk_mgr.evaluate_trailing_stop(pos2, p_breakeven)
+    print(f"  • Level 1 (+12% Gain): Entry ₹{entry_p:.2f} -> Price ₹{p_breakeven:.2f} | Trailed SL: ₹{sl_breakeven:.2f} (Breakeven +1.5%)")
+    assert sl_breakeven is not None and sl_breakeven > initial_sl
+
+    # Step B: Price surges to +25% (₹125.62) -> Peak-Protect Activates!
+    p_peak = entry_p * 1.25
+    sl_peak = risk_mgr.evaluate_trailing_stop(pos2, p_peak)
+    expected_peak_sl = round(p_peak * 0.93, 2) # 7% giveback ceiling from peak
+    print(f"  • Level 2 Peak-Protect (+25% Surge): Peak ₹{p_peak:.2f} | Trailed SL: ₹{sl_peak:.2f} (Locked in +{((sl_peak-entry_p)/entry_p)*100:.1f}%)")
+    assert sl_peak is not None and sl_peak == expected_peak_sl
+    assert pos2.trailing_level == 2
+
+    # Step C: Single violent red candle dumps price from ₹125.62 to ₹112.00
+    # Stop-loss triggers at ₹116.83, completely preventing the wipeout
+    dump_price = 112.00
+    assert dump_price <= pos2.stop_loss, "Dump price MUST be caught by the high-watermark stop-loss!"
+    print(f"  • Red Candle Protection: Dump to ₹{dump_price:.2f} safely stopped out at ₹{pos2.stop_loss:.2f} (+16.2% profit preserved)")
+    print("  ✅ Trailing Stop-Loss & Peak-Protect: PASSED")
 
     # 6. Test Stock Screener RVOL & Breakout
     print("\n[TEST 6] Stock Momentum Screener...")

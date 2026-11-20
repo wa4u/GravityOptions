@@ -164,7 +164,13 @@ class TradingEngine:
 
             # 1. Check Stop Loss
             if current_price <= pos.stop_loss:
-                record = self.broker.sell_option(contract, current_price, reason="Stop-Loss Hit")
+                if getattr(pos, "trailing_level", 0) >= 2:
+                    exit_reason = "Peak-Protect Trailed Stop Hit"
+                elif getattr(pos, "trailing_level", 0) == 1:
+                    exit_reason = "Breakeven Trailed Stop Hit"
+                else:
+                    exit_reason = "Stop-Loss Hit"
+                record = self.broker.sell_option(contract, current_price, reason=exit_reason)
                 if record:
                     self.cooldowns[pos.symbol] = now + timedelta(minutes=self.cooldown_mins)
                     log.info(f"⏳ Cooldown activated: No new trades on {pos.symbol} for {self.cooldown_mins} minutes.")

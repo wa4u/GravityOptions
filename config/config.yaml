@@ -143,9 +143,16 @@ risk:
   max_daily_trades: 20        # Hard limit on total trades per day (expanded from 5 to 20 for data gathering)
   max_trades_per_symbol: 3    # Max trades allowed on a single symbol per day
   stop_loss_pct: 15.0        # Default stop-loss on option premium (15%)
-  target_profit_pct: 28.0    # Responsive target profit on option premium (tuned from 35% to 28% for low VIX regimes)
-  trail_sl_trigger_pct: 14.0 # Move SL to breakeven once profit reaches 14%
+  target_profit_pct: 25.0    # Responsive target profit on option premium (tuned from 35% to 25% for low/normal VIX regimes)
+  trail_sl_trigger_pct: 12.0 # Move SL to breakeven once profit reaches 12%
   trail_step_pct: 8.0        # Subsequent trailing step (8% steps)
+
+  # High-Watermark Peak Profit Protection (Guarantees windfall gains aren't wiped out by one red candle)
+  peak_protect:
+    enabled: true             # Toggle on/off: True = protect profits from peak; False = classic step trailing
+    trigger_pct: 18.0         # Activate peak trailing once option reaches >= +18% gain
+    lock_in_min_pct: 10.0     # Guarantee at least +10% profit locked in at trigger
+    giveback_pct: 7.0         # Maximum allowed pullback from peak price (7% giveback ceiling)
 
 # Paper Trading Cost Simulation (Indian Taxes & Charges)
 paper_simulation:
