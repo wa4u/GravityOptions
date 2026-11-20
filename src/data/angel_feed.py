@@ -16,7 +16,7 @@ from SmartApi import SmartConnect
 import pandas as pd
 from src.data.base_feed import BaseDataFeed, MarketTick, Candle
 from src.utils.logger import log
-from src.utils.time_utils import get_now_ist
+from src.utils.time_utils import get_now_ist, is_market_open
 
 KNOWN_TOKENS = {
     # Major Indices
@@ -260,9 +260,13 @@ class AngelOneFeed(BaseDataFeed):
         # Check 120-second cache (5-minute candles update every 5m; 120s caching saves rate limits)
         cache_key = f"{symbol}_{api_interval}"
         now_ts = time.time()
+        now_ist = get_now_ist()
+        today_date = now_ist.date()
+
         if cache_key in self._candle_cache:
             last_ts, cached_candles = self._candle_cache[cache_key]
-            if now_ts - last_ts < 120.0 and len(cached_candles) > 0:
+            has_today = any(c.timestamp.date() == today_date for c in cached_candles)
+            if (has_today or not is_market_open(now_ist)) and now_ts - last_ts < 120.0 and len(cached_candles) > 0:
                 return cached_candles[-count:] if count and len(cached_candles) > count else cached_candles
 
         candles: List[Candle] = []
@@ -319,6 +323,17 @@ class AngelOneFeed(BaseDataFeed):
                         return self._candle_cache[cache_key][1][-count:]
                 else:
                     log.error(f"Exception fetching candles for {symbol} ({sym_token}): {e}")
+
+        # Check if primary feed returned candles for today
+        has_today = any(c.timestamp.date() == today_date for c in candles) if candles else False
+
+        # If market is currently open and SmartAPI returned candles only up to yesterday:
+        # Fall back to secondary market feed (yfinance) to get today's live intraday session
+        if not has_today and is_market_open(now_ist):
+            log.info(f"SmartAPI candles for {symbol} do not contain today ({today_date}). Falling back to secondary feed (yfinance)...")
+            yf_candles = self._fetch_yfinance_candles(symbol, interval=interval, count=count)
+            if yf_candles and any(c.timestamp.date() == today_date for c in yf_candles):
+                candles = yf_candles
 
         if candles:
             self._candle_cache[cache_key] = (now_ts, candles)

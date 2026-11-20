@@ -150,7 +150,11 @@ class IndexScreener:
         
         # Guard: Ensure candle data contains today's actual trading session
         if latest_date != today_date:
-            log.warning(f"Index candles for {symbol} do not contain target date ({today_date}). Latest is {latest_date}. Skipping.")
+            self._log_throttled(
+                f"{symbol}_missing_date",
+                f"Index candles for {symbol} do not contain target date ({today_date}). Latest is {latest_date}. Skipping.",
+                cooldown_secs=60.0
+            )
             return None
 
         today_df = df[df["date_only"] == today_date].copy()
