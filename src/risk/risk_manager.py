@@ -64,6 +64,20 @@ class RiskManager:
         if broken:
             return False, f"Trading halted: {reason}"
 
+        # 1.5. Morning Opening Buffer (09:15 - 09:30 IST)
+        # Avoid opening 15-minute gap whipsaws, institutional order sweeps, & extreme bid-ask spreads
+        entry_start_str = self.config.get("system", {}).get("entry_start_time", "09:30")
+        if entry_start_str:
+            try:
+                from datetime import time as dt_time
+                parts = [int(p) for p in entry_start_str.split(":")]
+                entry_start_t = dt_time(parts[0], parts[1])
+                now_t = get_now_ist().time()
+                if now_t < entry_start_t:
+                    return False, f"Morning opening buffer active ({now_t.strftime('%H:%M:%S')} IST). New entries begin at {entry_start_str} IST."
+            except Exception:
+                pass
+
         # 2. Midday Chop Pause Window (11:30 - 13:15 IST)
         pause_cfg = self.config.get("system", {}).get("midday_pause", {})
         if pause_cfg.get("enabled", True):
@@ -117,11 +131,12 @@ class RiskManager:
         lot_size: int,
         entry_price: float,
         broker_capital: float,
-        configured_lots: int = 1
+        configured_lots: int = 1,
+        max_lots: int = 1
     ) -> Tuple[int, int]:
         """
         Calculate (quantity, lots).
-        Supports 'fixed_lots' or 'risk_percentage' modes.
+        Supports 'fixed_lots' or 'risk_percentage' modes, strictly enforcing max_lots cap.
         """
         mode = self.sizing_cfg.get("mode", "fixed_lots")
         
@@ -133,12 +148,13 @@ class RiskManager:
             if sl_point_risk > 0:
                 raw_qty = int(max_risk_amount / sl_point_risk)
                 calculated_lots = max(1, raw_qty // lot_size)
-                # Cap at 5 lots max for safety
-                calculated_lots = min(calculated_lots, 5)
+                # Cap at max_lots for strict risk boundary
+                calculated_lots = min(calculated_lots, max(1, max_lots))
                 return calculated_lots * lot_size, calculated_lots
 
-        # Default: fixed lots
-        lots = max(1, configured_lots)
+        # Default: fixed lots capped at max_lots
+        effective_max = max(1, max_lots)
+        lots = min(max(1, configured_lots), effective_max)
         return lots * lot_size, lots
 
     def evaluate_trailing_stop(self, pos: Position, current_price: float) -> Optional[float]:

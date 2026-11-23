@@ -7,6 +7,7 @@ system:
   broker: "angelone"         # "dhan", "angelone", or "mock" (Switch to "dhan" once subscribed)
   timezone: "Asia/Kolkata"
   trading_start_time: "09:15"
+  entry_start_time: "09:30"   # Buffer morning opening gap whipsaws (09:15-09:30); active entries begin at 09:30 IST
   intraday_exit_time: "15:15"
   market_close_time: "15:30"
   stagnation_timeout_mins: 20 # Exit option if no favorable move in 20 mins (anti-theta)
@@ -52,7 +53,7 @@ indices:
     lot_size: 15
     strike_step: 100
     fixed_lots: 1
-    max_lots: 4
+    max_lots: 1              # Strictly pinned to 1 lot max (15 qty) for controlled risk
     atm_offset: 0
     prefer_itm_delta: 0.55
 

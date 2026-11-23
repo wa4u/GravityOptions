@@ -325,7 +325,8 @@ class TradingEngine:
                 if opt_info:
                     contract_symbol = opt_info["symbol"]
                     display_name = opt_info.get("display_name", contract_symbol)
-                    lot_size = int(opt_info.get("lotsize", cfg.get("lot_size", 25)))
+                    configured_lot_size = cfg.get("lot_size")
+                    lot_size = int(configured_lot_size) if configured_lot_size else int(opt_info.get("lotsize", 25))
                     expiry = datetime.strptime(opt_info.get("expiry"), "%d%b%Y").date()
                 else:
                     expiry = self.instrument_mgr.get_next_expiry(symbol, now.date())
@@ -333,7 +334,7 @@ class TradingEngine:
                         symbol, expiry, signal.target_strike, signal.option_type
                     )
                     display_name = contract_symbol
-                    lot_size = cfg.get("lot_size", 25)
+                    lot_size = int(cfg.get("lot_size", 25))
 
                 if contract_symbol in self.broker.positions:
                     continue # Already in this trade
@@ -360,7 +361,8 @@ class TradingEngine:
                     lot_size=lot_size,
                     entry_price=entry_premium,
                     broker_capital=self.broker.cash,
-                    configured_lots=cfg.get("fixed_lots", 1)
+                    configured_lots=cfg.get("fixed_lots", 1),
+                    max_lots=cfg.get("max_lots", 1)
                 )
 
                 greeks = calculate_greeks(signal.spot_price, signal.target_strike, t_years, iv=0.15, option_type=signal.option_type)

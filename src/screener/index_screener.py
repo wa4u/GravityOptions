@@ -185,9 +185,13 @@ class IndexScreener:
         else:
             age_secs = (now.replace(tzinfo=None) - last_candle_ts).total_seconds()
 
+        # Strict Closed Bar Check:
         # If the latest 5m candle has been open for less than 285s (4m 45s), it is still forming!
-        # In that case, evaluate strictly on the last completed bar (today_df.iloc[-2])
-        if age_secs < 285 and len(today_df) >= 5:
+        # Cannot evaluate breakouts on an unclosed candle.
+        if age_secs < 285:
+            if len(today_df) < 5:
+                # 4th bar (09:30 - 09:35 IST) is still forming; wait until it fully completes
+                return None
             eval_row = today_df.iloc[-2]
             prev_row = today_df.iloc[-3]
         else:
