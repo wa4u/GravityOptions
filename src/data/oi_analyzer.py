@@ -710,7 +710,8 @@ class OIAnalyzer:
             score += 15
             reasons.append(f"Negative Gamma Accelerator (Net GEX {oi_result.total_net_gex:+.1f} Cr)")
         elif oi_result.gamma_regime == "POSITIVE_GAMMA":
-            score -= 10
+            # Mild penalty only; do not block confirmed Call Wall / Put Wall breakouts
+            score -= 5
             reasons.append(f"Positive Gamma Pinning Chop Warning (Net GEX {oi_result.total_net_gex:+.1f} Cr)")
 
         if oi_result.gamma_flip_level:
@@ -724,6 +725,9 @@ class OIAnalyzer:
         # Pillar 6: Macro Institutional Participant Bias (NSE FII Tracker)
         if participant_tracker:
             pt_mod, pt_reason = participant_tracker.get_bias_score_modifier(direction)
+            # Cap macro headwind penalty at -5 so FII short positioning doesn't blind us to short-covering rallies
+            if pt_mod < -5:
+                pt_mod = -5
             score += pt_mod
             if pt_reason:
                 reasons.append(f"Macro Flow: {pt_reason} ({pt_mod:+,d} pts)")

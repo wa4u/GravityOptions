@@ -30,12 +30,19 @@ except ImportError:
         IST = timezone(timedelta(hours=5, minutes=30), name="IST")
 
 def is_trading_session_now() -> bool:
-    """Return True if current time is Mon-Fri between 09:10 and 15:30 IST."""
+    """Return True if current time is Mon-Fri (non-holiday) between 09:10 and 15:30 IST."""
     now_ist = datetime.now(IST)
     
     # 0 = Monday, 4 = Friday
     if now_ist.weekday() >= 5:
         return False
+
+    try:
+        from src.utils.time_utils import get_market_holiday_name
+        if get_market_holiday_name(now_ist):
+            return False
+    except Exception:
+        pass
 
     session_start = dtime(9, 10) # Start 5 minutes before opening bell
     session_end = dtime(15, 30)

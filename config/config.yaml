@@ -124,8 +124,8 @@ market_regime:
 # Open Interest (OI) & Institutional Order Flow Conviction Gate (MrChartist Model)
 oi_analysis:
   enabled: true
-  min_conviction_score: 55     # Minimum Institutional Conviction (0-100) required to open trade
-  min_pcr_for_call: 0.90      # Minimum PCR required to take a BUY_CALL (rejects call traps)
+  min_conviction_score: 40     # Minimum Institutional Conviction (0-100) required to open trade (tuned for Angel One static OI + short-covering rallies)
+  min_pcr_for_call: 0.75      # Minimum PCR required to take a BUY_CALL (allows short-covering rallies while rejecting extreme <0.75 call traps)
   max_pcr_for_put: 1.15       # Maximum PCR required to take a BUY_PUT (rejects put traps)
   min_distance_to_wall: 25.0  # Minimum buffer (points) from Call Wall/Put Wall to avoid slamming into resistance/support
   num_strikes_each_side: 5    # Strikes above and below ATM to analyze (11 strikes total)
