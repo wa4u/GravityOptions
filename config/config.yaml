@@ -47,7 +47,7 @@ indices:
     itm_depth: 2             # 2 strikes ITM (~100 pts on Nifty)
 
   BANKNIFTY:
-    enabled: true
+    enabled: false           # Disabled: 0% win rate recently (-₹4,665 vs NIFTY +₹2,316); focus on NIFTY weekly liquidity
     exchange: "NSE"
     spot_symbol: "Nifty Bank"
     lot_size: 15
