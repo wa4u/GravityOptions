@@ -25,6 +25,8 @@ class Position:
     trading_mode: str = "INTRADAY" # "INTRADAY" or "SWING"
     highest_price: float = 0.0
     trailing_level: int = 0
+    sl_breach_ticks: int = 0
+    tp_breach_ticks: int = 0
     is_open: bool = True
     display_name: str = ""
     exchange: str = "NFO"

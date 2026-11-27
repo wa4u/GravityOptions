@@ -165,8 +165,18 @@ class TradingEngine:
             if current_price > pos.highest_price:
                 pos.highest_price = current_price
 
-            # 1. Check Stop Loss
+            confirm_ticks = max(1, int(self.config.get("risk", {}).get("confirm_exit_ticks", 2)))
+
+            # 1. Check Stop Loss (with 2-tick bad-tick confirmation guard)
             if current_price <= pos.stop_loss:
+                pos.sl_breach_ticks = getattr(pos, "sl_breach_ticks", 0) + 1
+                pos.tp_breach_ticks = 0
+                if pos.sl_breach_ticks < confirm_ticks:
+                    log.info(
+                        f"🛡️ [Exit Guard] {contract} touched SL (₹{current_price:.2f} <= ₹{pos.stop_loss:.2f}) "
+                        f"[Tick {pos.sl_breach_ticks}/{confirm_ticks}] — awaiting confirmation"
+                    )
+                    continue
                 if getattr(pos, "trailing_level", 0) >= 2:
                     exit_reason = "Peak-Protect Trailed Stop Hit"
                 elif getattr(pos, "trailing_level", 0) == 1:
@@ -180,9 +190,18 @@ class TradingEngine:
                     self.telegram_notifier.notify_order_exit(record.__dict__)
                     self._export_live_web_report()
                 continue
+            else:
+                pos.sl_breach_ticks = 0
 
-            # 2. Check Target Profit
+            # 2. Check Target Profit (with 2-tick confirmation guard)
             if current_price >= pos.target:
+                pos.tp_breach_ticks = getattr(pos, "tp_breach_ticks", 0) + 1
+                if pos.tp_breach_ticks < confirm_ticks:
+                    log.info(
+                        f"🎯 [Exit Guard] {contract} reached TP (₹{current_price:.2f} >= ₹{pos.target:.2f}) "
+                        f"[Tick {pos.tp_breach_ticks}/{confirm_ticks}] — awaiting confirmation"
+                    )
+                    continue
                 record = self.broker.sell_option(contract, current_price, reason="Target Profit Reached")
                 if record:
                     self.cooldowns[pos.symbol] = now + timedelta(minutes=self.cooldown_mins)
@@ -190,6 +209,8 @@ class TradingEngine:
                     self.telegram_notifier.notify_order_exit(record.__dict__)
                     self._export_live_web_report()
                 continue
+            else:
+                pos.tp_breach_ticks = 0
 
             # 3. Check Trailing Stop
             old_sl = pos.stop_loss

@@ -58,6 +58,9 @@ class DhanFeed(BaseDataFeed):
         self.is_connected: bool = False
         self._cached_ltp: Dict[str, float] = {}
         self._last_quote_time: Dict[str, float] = {}
+        self._oc_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+        self._last_oc_call: float = 0.0
+        self.instrument_mgr: Optional[Any] = None
 
     def connect(self) -> bool:
         """Initialize DhanHQ connection and authenticate."""
@@ -219,11 +222,12 @@ class DhanFeed(BaseDataFeed):
     def get_option_chain(
         self,
         symbol: str,
-        expiry: Optional[str] = None
+        expiry: Optional[str] = None,
+        cache_ttl: float = 15.0
     ) -> Dict[str, Any]:
         """
-        Native unified Dhan Option Chain endpoint (/v2/optionchain).
-        Fetches all strikes, volume, open interest, and precomputed Greeks (Delta, Theta, Gamma, IV).
+        Native unified Dhan Option Chain endpoint (/v2/optionchain) with 15s coalescing cache
+        and 3.0s upstream rate-limit pacing (Option Hub proxy-server model).
         """
         if not self.is_connected or not self.dhan:
             return {}
@@ -236,23 +240,44 @@ class DhanFeed(BaseDataFeed):
         sec_id = idx_info["security_id"]
         seg = idx_info["exchange_segment"]
 
-        # Default expiry: nearest Thursday if not provided
+        # Resolve expiry via InstrumentManager if available, else nearest Thursday fallback
         if not expiry:
-            today = date.today()
-            days_ahead = (3 - today.weekday()) % 7 # Thursday is weekday 3
-            if days_ahead == 0 and datetime.now().hour >= 15:
-                days_ahead = 7
-            next_thu = today + timedelta(days=days_ahead)
-            expiry = next_thu.strftime("%Y-%m-%d")
+            if self.instrument_mgr and hasattr(self.instrument_mgr, "get_next_expiry"):
+                try:
+                    expiry = self.instrument_mgr.get_next_expiry(sym_upper, date.today()).strftime("%Y-%m-%d")
+                except Exception:
+                    expiry = None
+            if not expiry:
+                today = date.today()
+                days_ahead = (3 - today.weekday()) % 7
+                if days_ahead == 0 and datetime.now().hour >= 15:
+                    days_ahead = 7
+                expiry = (today + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+
+        cache_key = f"{sym_upper}_{expiry}"
+        now_ts = time.time()
+        if cache_key in self._oc_cache:
+            cached_ts, cached_data = self._oc_cache[cache_key]
+            if (now_ts - cached_ts) < cache_ttl and cached_data:
+                return cached_data
+
+        # Enforce >= 3.0s pacing between /v2/optionchain requests
+        elapsed = now_ts - self._last_oc_call
+        if elapsed < 3.0:
+            time.sleep(3.0 - elapsed)
 
         try:
+            self._last_oc_call = time.time()
             resp = self.dhan.option_chain(
                 under_security_id=sec_id,
                 under_exchange_segment=seg,
                 expiry=expiry
             )
             if isinstance(resp, dict) and resp.get("status", "").lower() == "success":
-                return resp.get("data", {})
+                data = resp.get("data", {})
+                if data:
+                    self._oc_cache[cache_key] = (time.time(), data)
+                return data
         except Exception as e:
             log.warning(f"⚠️ [DhanFeed] Error querying option chain for {symbol}: {e}")
 

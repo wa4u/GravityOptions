@@ -152,6 +152,7 @@ risk:
   max_trades_per_symbol: 3    # Max trades allowed on a single symbol per day
   stop_loss_pct: 15.0        # Default stop-loss on option premium (15%)
   target_profit_pct: 25.0    # Responsive target profit on option premium (tuned from 35% to 25% for low/normal VIX regimes)
+  confirm_exit_ticks: 2      # Require 2 consecutive ticks beyond SL/TP before exiting (bad-tick spike protection)
   trail_sl_trigger_pct: 12.0 # Move SL to breakeven once profit reaches 12%
   trail_step_pct: 8.0        # Subsequent trailing step (8% steps)
 
