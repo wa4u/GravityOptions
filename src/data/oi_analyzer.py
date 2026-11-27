@@ -4,6 +4,7 @@ from datetime import date
 from typing import Dict, List, Optional, Tuple, Any
 from src.utils.logger import log
 from src.utils.greeks import calculate_greeks
+from src.data.flow_tracker import IntradayFlowTracker, FlowMetrics
 
 LOT_SIZES: Dict[str, int] = {
     "NIFTY": 25,
@@ -83,6 +84,8 @@ class OIAnalysisResult:
     total_net_gex: float = 0.0            # ₹ Cr per 1% move
     gamma_regime: str = "NEUTRAL"         # "POSITIVE_GAMMA" (volatility dampener/chop) or "NEGATIVE_GAMMA" (breakout accelerator)
     gamma_flip_level: Optional[float] = None # Price level where net GEX crosses 0
+    # Intraday Snapshot-Diff Flow & Premium Tide (Option Hub methodology)
+    flow_metrics: Optional[FlowMetrics] = None
 
 class OIAnalyzer:
     """
@@ -94,6 +97,7 @@ class OIAnalyzer:
         self.instrument_mgr = instrument_mgr
         self.cache_ttl = cache_ttl
         self._cache: Dict[str, OIAnalysisResult] = {}
+        self.flow_tracker = IntradayFlowTracker()
 
     def calculate_gex_profile(
         self,
@@ -338,6 +342,19 @@ class OIAnalyzer:
         atm_call_oi_change = atm_row.ce_oi_change if atm_row else 0
         atm_put_oi_change = atm_row.pe_oi_change if atm_row else 0
 
+        # Snapshot-diff Intraday Flow & OI Delta backfill (for feeds like Angel One where oi_change=0)
+        flow_metrics = self.flow_tracker.update_snapshot(
+            sym_upper, spot_price, strikes_data, atm_strike, now_ts=now_ts
+        )
+        if total_call_oi_change == 0 and total_put_oi_change == 0 and flow_metrics.snapshots_count >= 2:
+            total_call_oi_change = flow_metrics.total_ce_oi_delta
+            total_put_oi_change = flow_metrics.total_pe_oi_delta
+            atm_call_oi_change = flow_metrics.atm_ce_oi_delta
+            atm_put_oi_change = flow_metrics.atm_pe_oi_delta
+            if atm_row:
+                atm_call_buildup = classify_buildup(atm_row.ce_net_change, atm_call_oi_change)
+                atm_put_buildup = classify_buildup(atm_row.pe_net_change, atm_put_oi_change)
+
         # Overall Net Order Flow (Bulls vs Bears)
         net_writer_flow = total_put_oi_change - total_call_oi_change
         if net_writer_flow > 50000:
@@ -383,7 +400,8 @@ class OIAnalyzer:
             total_put_gex=tot_put_gex,
             total_net_gex=tot_net_gex,
             gamma_regime=gamma_regime,
-            gamma_flip_level=flip_level
+            gamma_flip_level=flip_level,
+            flow_metrics=flow_metrics
         )
 
         self._cache[sym_upper] = res
@@ -731,6 +749,38 @@ class OIAnalyzer:
             score += pt_mod
             if pt_reason:
                 reasons.append(f"Macro Flow: {pt_reason} ({pt_mod:+,d} pts)")
+
+        # Pillar 7: Intraday Options Flow, Premium Tide & HIRO Hedge Pressure
+        fm = getattr(oi_result, "flow_metrics", None)
+        if fm and fm.snapshots_count >= 2:
+            flow_pts = 0
+            if is_call:
+                if fm.flow_bias == "BULLISH":
+                    flow_pts += 10
+                    reasons.append(f"Bullish Premium Tide ({fm.recent_net_tide_cr:+.2f} Cr)")
+                elif fm.flow_bias == "BEARISH":
+                    flow_pts -= 5
+                    reasons.append(f"Bearish Tide Headwind ({fm.recent_net_tide_cr:+.2f} Cr)")
+                if fm.hedge_pressure_cr >= 1.0:
+                    flow_pts += 5
+                    reasons.append(f"Supportive Hedge Flow (+{fm.hedge_pressure_cr:.1f} Cr)")
+                if fm.unusual_calls:
+                    flow_pts += 5
+                    reasons.append(f"Unusual Call Vol/OI ({len(fm.unusual_calls)} strikes)")
+            else:
+                if fm.flow_bias == "BEARISH":
+                    flow_pts += 10
+                    reasons.append(f"Bearish Premium Tide ({fm.recent_net_tide_cr:+.2f} Cr)")
+                elif fm.flow_bias == "BULLISH":
+                    flow_pts -= 5
+                    reasons.append(f"Bullish Tide Headwind ({fm.recent_net_tide_cr:+.2f} Cr)")
+                if fm.hedge_pressure_cr <= -1.0:
+                    flow_pts += 5
+                    reasons.append(f"Bearish Hedge Flow ({fm.hedge_pressure_cr:.1f} Cr)")
+                if fm.unusual_puts:
+                    flow_pts += 5
+                    reasons.append(f"Unusual Put Vol/OI ({len(fm.unusual_puts)} strikes)")
+            score += max(-5, min(15, flow_pts))
 
         score = max(0, min(100, score))
         summary_text = " | ".join(reasons)
