@@ -128,7 +128,7 @@ oi_analysis:
   min_pcr_for_call: 0.75      # Minimum PCR required to take a BUY_CALL (allows short-covering rallies while rejecting extreme <0.75 call traps)
   max_pcr_for_put: 1.15       # Maximum PCR required to take a BUY_PUT (rejects put traps)
   min_distance_to_wall: 25.0  # Minimum buffer (points) from Call Wall/Put Wall to avoid slamming into resistance/support
-  num_strikes_each_side: 5    # Strikes above and below ATM to analyze (11 strikes total)
+  num_strikes_each_side: 8    # Strikes above and below ATM to analyze (17 strikes total for wider OI Walls & GEX)
   cache_seconds: 60           # Cache OI metrics for 60 seconds
 
 # Position Sizing & Money Management

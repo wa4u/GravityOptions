@@ -1,9 +1,12 @@
+import math
+import statistics
 import time
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from typing import Dict, List, Optional, Tuple, Any
 from src.utils.logger import log
-from src.utils.greeks import calculate_greeks
+from src.utils.greeks import calculate_greeks, implied_forward, implied_vol_76, greeks_76_spot
+from src.utils.time_utils import get_now_ist, time_to_expiry_in_years
 from src.data.flow_tracker import IntradayFlowTracker, FlowMetrics
 
 LOT_SIZES: Dict[str, int] = {
@@ -35,6 +38,8 @@ class StrikeOIData:
     pe_buildup: str
     ce_gamma: float = 0.0
     pe_gamma: float = 0.0
+    ce_iv: float = 0.0
+    pe_iv: float = 0.0
     call_gex: float = 0.0     # ₹ Cr per 1% move
     put_gex: float = 0.0      # ₹ Cr per 1% move
     net_gex: float = 0.0      # ₹ Cr per 1% move
@@ -84,6 +89,10 @@ class OIAnalysisResult:
     total_net_gex: float = 0.0            # ₹ Cr per 1% move
     gamma_regime: str = "NEUTRAL"         # "POSITIVE_GAMMA" (volatility dampener/chop) or "NEGATIVE_GAMMA" (breakout accelerator)
     gamma_flip_level: Optional[float] = None # Price level where net GEX crosses 0
+    # Phase 2: Premium PCR, ATM IV & Expected Move (Option Hub methodology)
+    pcr_premium: float = 1.0
+    atm_iv: float = 0.15
+    expected_move_1sigma: float = 0.0
     # Intraday Snapshot-Diff Flow & Premium Tide (Option Hub methodology)
     flow_metrics: Optional[FlowMetrics] = None
 
@@ -99,6 +108,47 @@ class OIAnalyzer:
         self._cache: Dict[str, OIAnalysisResult] = {}
         self.flow_tracker = IntradayFlowTracker()
 
+    def _estimate_forward_and_ivs(
+        self,
+        spot_price: float,
+        strikes_data: List[StrikeOIData],
+        time_to_expiry_years: float,
+        default_iv: float = 0.15
+    ) -> Tuple[float, float]:
+        """Compute Put-Call Parity forward and backfill missing strike IVs via Black-76."""
+        T = max(time_to_expiry_years, 1e-4)
+        near_rows = sorted(strikes_data, key=lambda r: abs(r.strike - spot_price))[:3]
+        fwd_samples = [
+            implied_forward(r.strike, r.ce_ltp, r.pe_ltp, T)
+            for r in near_rows
+            if r.ce_ltp > 0.05 and r.pe_ltp > 0.05
+        ]
+        forward = statistics.median(fwd_samples) if fwd_samples else spot_price * math.exp(0.07 * T)
+
+        atm_ivs = []
+        for r in strikes_data:
+            if r.ce_iv <= 0.005 and r.ce_ltp > 0.05:
+                iv_c = implied_vol_76(r.ce_ltp, forward, r.strike, T, option_type="CE")
+                if iv_c:
+                    r.ce_iv = iv_c
+            if r.pe_iv <= 0.005 and r.pe_ltp > 0.05:
+                iv_p = implied_vol_76(r.pe_ltp, forward, r.strike, T, option_type="PE")
+                if iv_p:
+                    r.pe_iv = iv_p
+            if abs(r.strike - spot_price) <= max(100.0, spot_price * 0.005):
+                if r.ce_iv > 0.01:
+                    atm_ivs.append(r.ce_iv)
+                if r.pe_iv > 0.01:
+                    atm_ivs.append(r.pe_iv)
+
+        atm_iv = statistics.median(atm_ivs) if atm_ivs else default_iv
+        for r in strikes_data:
+            if r.ce_iv <= 0.005:
+                r.ce_iv = atm_iv
+            if r.pe_iv <= 0.005:
+                r.pe_iv = atm_iv
+        return forward, atm_iv
+
     def calculate_gex_profile(
         self,
         symbol: str,
@@ -109,31 +159,30 @@ class OIAnalyzer:
         default_iv: float = 0.15
     ) -> Tuple[float, float, float, str, Optional[float]]:
         """
-        Calculates Dealer Gamma Exposure (GEX) across option chain strikes.
+        Calculates Dealer Gamma Exposure (GEX) using Black-76 spot-adjusted gamma & real strike IVs,
+        plus True Zero-Gamma Flip over a +/- 5% hypothetical spot grid (Option Hub convention).
         Returns: (total_call_gex, total_put_gex, total_net_gex, gamma_regime, gamma_flip_level)
-        Units: ₹ Crore per 1% move in spot price (Option Hub convention).
         """
         if not strikes_data or spot_price <= 0:
             return 0.0, 0.0, 0.0, "NEUTRAL", None
 
         ls = lot_size or LOT_SIZES.get(symbol.upper(), 25)
-        scale = (spot_price * spot_price * 0.01) / 1e7 # Spot^2 * 1% / 10^7 = ₹ Crore
+        T = max(time_to_expiry_years, 1e-4)
+        forward, _ = self._estimate_forward_and_ivs(spot_price, strikes_data, T, default_iv)
+        scale = (spot_price * spot_price * 0.01) / 1e7
 
         tot_call_gex = 0.0
         tot_put_gex = 0.0
 
         for row in strikes_data:
             k = row.strike
-            # Black-Scholes Greeks
-            ce_g = calculate_greeks(spot_price, k, time_to_expiry_years, default_iv, option_type="CE")
-            pe_g = calculate_greeks(spot_price, k, time_to_expiry_years, default_iv, option_type="PE")
+            ce_g = greeks_76_spot(spot_price, forward, k, T, row.ce_iv or default_iv, option_type="CE")
+            pe_g = greeks_76_spot(spot_price, forward, k, T, row.pe_iv or default_iv, option_type="PE")
 
             row.ce_gamma = ce_g.get("gamma", 0.0)
             row.pe_gamma = pe_g.get("gamma", 0.0)
 
-            # Call GEX: Dealer Long Call -> positive gamma
             row.call_gex = 1.0 * row.ce_gamma * row.ce_oi * ls * scale
-            # Put GEX: Dealer Short Put -> negative gamma
             row.put_gex = -1.0 * row.pe_gamma * row.pe_oi * ls * scale
             row.net_gex = row.call_gex + row.put_gex
 
@@ -141,31 +190,45 @@ class OIAnalyzer:
             tot_put_gex += row.put_gex
 
         tot_net_gex = tot_call_gex + tot_put_gex
+        gross_gex = abs(tot_call_gex) + abs(tot_put_gex)
 
-        # Determine Gamma Regime
-        threshold = max(2.0, (spot_price / 10000.0) * 2.0)
-        if tot_net_gex > threshold:
+        # Relative regime threshold: +/- 2% of gross GEX (Option Hub convention)
+        if gross_gex > 1e-6 and abs(tot_net_gex) <= 0.02 * gross_gex:
+            regime = "NEUTRAL"
+        elif tot_net_gex > 0:
             regime = "POSITIVE_GAMMA"
-        elif tot_net_gex < -threshold:
+        elif tot_net_gex < 0:
             regime = "NEGATIVE_GAMMA"
         else:
             regime = "NEUTRAL"
 
-        # Find Zero-Gamma Flip level
-        flip_level = None
-        sorted_rows = sorted(strikes_data, key=lambda r: r.strike)
-        for i, r in enumerate(sorted_rows):
-            if abs(r.net_gex) < 1e-3:
-                flip_level = r.strike
-                break
-            if i < len(sorted_rows) - 1:
-                r_next = sorted_rows[i + 1]
-                if (r.net_gex < 0 and r_next.net_gex > 0) or (r.net_gex > 0 and r_next.net_gex < 0):
-                    denom = r_next.net_gex - r.net_gex
-                    if abs(denom) > 1e-6:
-                        flip_level = r.strike + ((0.0 - r.net_gex) / denom) * (r_next.strike - r.strike)
-                        break
+        # True Zero-Gamma Flip: evaluate Net GEX across spot +/- 5% grid (41 steps)
+        basis_ratio = forward / spot_price
+        grid_spots = [spot_price * (0.95 + 0.10 * i / 40.0) for i in range(41)]
+        grid_net = []
+        for s_g in grid_spots:
+            f_g = s_g * basis_ratio
+            sc_g = (s_g * s_g * 0.01) / 1e7
+            net_g = 0.0
+            for row in strikes_data:
+                if row.ce_oi > 0:
+                    g_c = greeks_76_spot(s_g, f_g, row.strike, T, row.ce_iv or default_iv, option_type="CE")["gamma"]
+                    net_g += g_c * row.ce_oi * ls * sc_g
+                if row.pe_oi > 0:
+                    g_p = greeks_76_spot(s_g, f_g, row.strike, T, row.pe_iv or default_iv, option_type="PE")["gamma"]
+                    net_g -= g_p * row.pe_oi * ls * sc_g
+            grid_net.append(net_g)
 
+        crossings = []
+        for i in range(len(grid_spots) - 1):
+            y1, y2 = grid_net[i], grid_net[i + 1]
+            if y1 == 0.0:
+                crossings.append(grid_spots[i])
+            elif (y1 < 0 < y2) or (y1 > 0 > y2):
+                x_cross = grid_spots[i] + ((0.0 - y1) / (y2 - y1)) * (grid_spots[i + 1] - grid_spots[i])
+                crossings.append(x_cross)
+
+        flip_level = min(crossings, key=lambda x: abs(x - spot_price)) if crossings else None
         return round(tot_call_gex, 2), round(tot_put_gex, 2), round(tot_net_gex, 2), regime, (round(flip_level, 1) if flip_level else None)
 
     def analyze_symbol(
@@ -308,33 +371,57 @@ class OIAnalyzer:
         if total_call_oi <= 0 and total_put_oi <= 0:
             return default_result
 
-        pcr = round(total_put_oi / total_call_oi, 2) if total_call_oi > 0 else 1.0
+        # Resolve actual time to expiry from nearest contract expiry if available
+        t_years = 3.0 / 365.0
+        for s in strikes:
+            exp_str = (contracts.get(s, {}).get("CE", {}) or contracts.get(s, {}).get("PE", {})).get("expiry", "")
+            if exp_str:
+                try:
+                    exp_dt = datetime.strptime(exp_str, "%d%b%Y").date()
+                    t_years = time_to_expiry_in_years(exp_dt, get_now_ist())
+                    break
+                except Exception:
+                    pass
 
-        # 4. Calculate Max Pain
+        res = self._finalize_analysis(sym_upper, spot_price, strikes_data, now_ts, t_years)
+        self._cache[sym_upper] = res
+        return res
+
+    def _finalize_analysis(
+        self,
+        sym_upper: str,
+        spot_price: float,
+        strikes_data: List[StrikeOIData],
+        now_ts: float,
+        time_to_expiry_years: float = 3.0 / 365.0
+    ) -> OIAnalysisResult:
+        """Shared post-processing for Angel One and DhanHQ chains (Walls, Max Pain, Flow, Black-76 GEX)."""
+        strikes = [r.strike for r in strikes_data]
+        total_call_oi = sum(r.ce_oi for r in strikes_data)
+        total_put_oi = sum(r.pe_oi for r in strikes_data)
+        total_call_oi_change = sum(r.ce_oi_change for r in strikes_data)
+        total_put_oi_change = sum(r.pe_oi_change for r in strikes_data)
+
+        pcr = round(total_put_oi / total_call_oi, 2) if total_call_oi > 0 else 1.0
+        ce_prem_vol = sum(r.ce_ltp * r.ce_volume for r in strikes_data if r.ce_ltp > 0 and r.ce_volume > 0)
+        pe_prem_vol = sum(r.pe_ltp * r.pe_volume for r in strikes_data if r.pe_ltp > 0 and r.pe_volume > 0)
+        pcr_premium = round(pe_prem_vol / ce_prem_vol, 2) if ce_prem_vol > 0 and pe_prem_vol > 0 else pcr
+
+        # Max Pain
         min_loss = float("inf")
         max_pain_strike = spot_price
+        for s_cand in strikes:
+            tot_loss = sum(
+                max(0.0, s_cand - r.strike) * r.ce_oi + max(0.0, r.strike - s_cand) * r.pe_oi
+                for r in strikes_data
+            )
+            if tot_loss < min_loss:
+                min_loss = tot_loss
+                max_pain_strike = s_cand
 
-        for s_candidate in strikes:
-            total_loss = 0.0
-            for row in strikes_data:
-                if s_candidate > row.strike:
-                    total_loss += (s_candidate - row.strike) * row.ce_oi
-                if s_candidate < row.strike:
-                    total_loss += (row.strike - s_candidate) * row.pe_oi
+        sentiment = "BULLISH" if pcr >= 1.05 else ("BEARISH" if pcr <= 0.85 else "NEUTRAL")
 
-            if total_loss < min_loss:
-                min_loss = total_loss
-                max_pain_strike = s_candidate
-
-        # 5. Determine Sentiment & Institutional Order Flow
-        if pcr >= 1.05:
-            sentiment = "BULLISH"
-        elif pcr <= 0.85:
-            sentiment = "BEARISH"
-        else:
-            sentiment = "NEUTRAL"
-
-        # ATM Strike detection
+        # ATM Strike & Snapshot-diff Intraday Flow
         atm_strike = min(strikes, key=lambda s: abs(s - spot_price)) if strikes else spot_price
         atm_row = next((r for r in strikes_data if r.strike == atm_strike), None)
         atm_call_buildup = atm_row.ce_buildup if atm_row else "NEUTRAL"
@@ -342,7 +429,6 @@ class OIAnalyzer:
         atm_call_oi_change = atm_row.ce_oi_change if atm_row else 0
         atm_put_oi_change = atm_row.pe_oi_change if atm_row else 0
 
-        # Snapshot-diff Intraday Flow & OI Delta backfill (for feeds like Angel One where oi_change=0)
         flow_metrics = self.flow_tracker.update_snapshot(
             sym_upper, spot_price, strikes_data, atm_strike, now_ts=now_ts
         )
@@ -355,7 +441,14 @@ class OIAnalyzer:
                 atm_call_buildup = classify_buildup(atm_row.ce_net_change, atm_call_oi_change)
                 atm_put_buildup = classify_buildup(atm_row.pe_net_change, atm_put_oi_change)
 
-        # Overall Net Order Flow (Bulls vs Bears)
+        # Weighted OI Walls: oi + 0.5 * max(oi_change, 0) (Option Hub getOILevels)
+        ce_candidates = [r for r in strikes_data if r.strike >= spot_price] or strikes_data
+        pe_candidates = [r for r in strikes_data if r.strike <= spot_price] or strikes_data
+        cw_row = max(ce_candidates, key=lambda r: r.ce_oi + 0.5 * max(r.ce_oi_change, 0))
+        pw_row = max(pe_candidates, key=lambda r: r.pe_oi + 0.5 * max(r.pe_oi_change, 0))
+        call_wall, call_wall_oi = cw_row.strike, cw_row.ce_oi
+        put_wall, put_wall_oi = pw_row.strike, pw_row.pe_oi
+
         net_writer_flow = total_put_oi_change - total_call_oi_change
         if net_writer_flow > 50000:
             net_oi_flow = "LONG_BUILDUP"
@@ -368,21 +461,24 @@ class OIAnalyzer:
         else:
             net_oi_flow = "NEUTRAL"
 
-        # GEX Calculation
+        T = max(time_to_expiry_years, 1e-4)
+        forward, atm_iv = self._estimate_forward_and_ivs(spot_price, strikes_data, T)
+        expected_move = round(forward * math.sinh(atm_iv * math.sqrt(T)), 1)
+
         tot_call_gex, tot_put_gex, tot_net_gex, gamma_regime, flip_level = self.calculate_gex_profile(
-            sym_upper, spot_price, strikes_data
+            sym_upper, spot_price, strikes_data, time_to_expiry_years=T
         )
 
-        res = OIAnalysisResult(
+        return OIAnalysisResult(
             symbol=sym_upper,
             spot_price=spot_price,
             pcr=pcr,
             total_call_oi=total_call_oi,
             total_put_oi=total_put_oi,
             call_wall=call_wall,
-            call_wall_oi=max_call_oi,
+            call_wall_oi=call_wall_oi,
             put_wall=put_wall,
-            put_wall_oi=max_put_oi,
+            put_wall_oi=put_wall_oi,
             max_pain=max_pain_strike,
             sentiment=sentiment,
             strikes_data=strikes_data,
@@ -401,11 +497,11 @@ class OIAnalyzer:
             total_net_gex=tot_net_gex,
             gamma_regime=gamma_regime,
             gamma_flip_level=flip_level,
-            flow_metrics=flow_metrics
+            pcr_premium=pcr_premium,
+            atm_iv=round(atm_iv, 4),
+            expected_move_1sigma=expected_move,
+            flow_metrics=flow_metrics,
         )
-
-        self._cache[sym_upper] = res
-        return res
 
     def _parse_dhan_option_chain(
         self,
@@ -492,74 +588,13 @@ class OIAnalyzer:
                 pe_volume=pe_vol,
                 pe_ltp=pe_ltp,
                 pe_net_change=pe_p_chg,
-                pe_buildup=classify_buildup(pe_p_chg, pe_chg)
+                pe_buildup=classify_buildup(pe_p_chg, pe_chg),
+                ce_iv=float(ce.get("implied_volatility", 0.0) or 0.0) / 100.0 if float(ce.get("implied_volatility", 0.0) or 0.0) > 1.0 else float(ce.get("implied_volatility", 0.0) or 0.0),
+                pe_iv=float(pe.get("implied_volatility", 0.0) or 0.0) / 100.0 if float(pe.get("implied_volatility", 0.0) or 0.0) > 1.0 else float(pe.get("implied_volatility", 0.0) or 0.0),
             ))
 
-        pcr = round(total_put_oi / total_call_oi, 2) if total_call_oi > 0 else 1.0
-
-        min_loss = float("inf")
-        max_pain_strike = spot_price
-        for s_cand, _ in selected:
-            tot_loss = sum(max(0, s_cand - r.strike) * r.ce_oi + max(0, r.strike - s_cand) * r.pe_oi for r in strikes_data)
-            if tot_loss < min_loss:
-                min_loss = tot_loss
-                max_pain_strike = s_cand
-
-        sentiment = "BULLISH" if pcr >= 1.05 else ("BEARISH" if pcr <= 0.85 else "NEUTRAL")
-
-        atm_row = next((r for r in strikes_data if r.strike == atm_strike), None)
-        atm_call_buildup = atm_row.ce_buildup if atm_row else "NEUTRAL"
-        atm_put_buildup = atm_row.pe_buildup if atm_row else "NEUTRAL"
-        atm_call_oi_change = atm_row.ce_oi_change if atm_row else 0
-        atm_put_oi_change = atm_row.pe_oi_change if atm_row else 0
-
-        net_writer_flow = total_put_oi_change - total_call_oi_change
-        if net_writer_flow > 50000:
-            net_oi_flow = "LONG_BUILDUP"
-        elif net_writer_flow < -50000:
-            net_oi_flow = "SHORT_BUILDUP"
-        elif total_call_oi_change < -20000 and total_put_oi_change <= 0:
-            net_oi_flow = "SHORT_COVERING"
-        elif total_put_oi_change < -20000 and total_call_oi_change <= 0:
-            net_oi_flow = "LONG_UNWINDING"
-        else:
-            net_oi_flow = "NEUTRAL"
-
-        # GEX Calculation
-        tot_call_gex, tot_put_gex, tot_net_gex, gamma_regime, flip_level = self.calculate_gex_profile(
-            symbol, spot_price, strikes_data
-        )
-
-        res = OIAnalysisResult(
-            symbol=symbol,
-            spot_price=spot_price,
-            pcr=pcr,
-            total_call_oi=total_call_oi,
-            total_put_oi=total_put_oi,
-            call_wall=call_wall,
-            call_wall_oi=max_call_oi,
-            put_wall=put_wall,
-            put_wall_oi=max_put_oi,
-            max_pain=max_pain_strike,
-            sentiment=sentiment,
-            strikes_data=strikes_data,
-            is_valid=True,
-            timestamp=now_ts,
-            net_oi_flow=net_oi_flow,
-            atm_strike=atm_strike,
-            atm_call_buildup=atm_call_buildup,
-            atm_put_buildup=atm_put_buildup,
-            atm_call_oi_change=atm_call_oi_change,
-            atm_put_oi_change=atm_put_oi_change,
-            total_call_oi_change=total_call_oi_change,
-            total_put_oi_change=total_put_oi_change,
-            total_call_gex=tot_call_gex,
-            total_put_gex=tot_put_gex,
-            total_net_gex=tot_net_gex,
-            gamma_regime=gamma_regime,
-            gamma_flip_level=flip_level
-        )
-        self._cache[symbol] = res
+        res = self._finalize_analysis(symbol.upper().strip(), spot_price, strikes_data, now_ts)
+        self._cache[symbol.upper().strip()] = res
         return res
 
     def validate_signal(
