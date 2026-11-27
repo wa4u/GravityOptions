@@ -131,6 +131,13 @@ oi_analysis:
   num_strikes_each_side: 8    # Strikes above and below ATM to analyze (17 strikes total for wider OI Walls & GEX)
   cache_seconds: 60           # Cache OI metrics for 60 seconds
 
+# Phase 3: Volatility, Expected Move & Delta-Targeted Strike Selection (Option Hub model)
+volatility_guard:
+  enabled: true
+  max_expected_move_consumed_pct: 90.0  # Block late entries if spot already moved >= 90% of 1-day 1σ Expected Move from open
+  max_iv_hv_ratio: 1.60                 # Block option buying when ATM IV > 1.60x realised HV (IV crush risk)
+  use_delta_strike_selection: true      # Dynamically pick strike matching prefer_itm_delta instead of static ±2 offset
+
 # Position Sizing & Money Management
 position_sizing:
   mode: "fixed_lots"         # Options: "fixed_lots" or "risk_percentage"

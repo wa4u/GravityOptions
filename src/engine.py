@@ -4,7 +4,10 @@ from typing import Dict, Any, List, Optional
 import time
 
 from src.utils.logger import log
-from src.utils.greeks import calculate_greeks, implied_volatility, black_scholes_price
+from src.utils.greeks import (
+    calculate_greeks, implied_volatility, black_scholes_price,
+    expected_move_1day, realized_vol_from_candles, find_strike_for_delta
+)
 from src.utils.time_utils import (
     get_now_ist, is_market_open, is_intraday_exit_time, time_to_expiry_in_years
 )
@@ -301,6 +304,43 @@ class TradingEngine:
                             continue
 
                         log.info(f"🔥 [Order Flow Confirmed] {symbol} {signal.direction}: {oi_rsn}")
+
+                        # Phase 3: Volatility Guard (Expected Move Exhaustion + IV/HV Crush) & Delta Strike Selection
+                        vol_cfg = self.config.get("volatility_guard", {})
+                        if vol_cfg.get("enabled", True):
+                            today_candles = [c for c in candles if hasattr(c.timestamp, "date") and c.timestamp.date() == now.date()]
+                            today_open = today_candles[0].open if today_candles else 0.0
+                            em_1d = expected_move_1day(signal.spot_price, getattr(oi_res, "atm_iv", 0.15))
+                            if em_1d > 0 and today_open > 0:
+                                consumed_pct = (abs(signal.spot_price - today_open) / em_1d) * 100.0
+                                max_em_pct = float(vol_cfg.get("max_expected_move_consumed_pct", 90.0))
+                                if consumed_pct >= max_em_pct:
+                                    log.info(
+                                        f"🛡️ [Volatility Guard] {symbol} {signal.direction} blocked: "
+                                        f"Expected Move exhausted ({consumed_pct:.0f}% >= {max_em_pct:.0f}% of ±{em_1d:.0f} pts)"
+                                    )
+                                    continue
+
+                            hv = realized_vol_from_candles(candles)
+                            atm_iv = getattr(oi_res, "atm_iv", 0.0)
+                            max_ratio = float(vol_cfg.get("max_iv_hv_ratio", 1.60))
+                            if hv and atm_iv > 0 and (atm_iv / hv) > max_ratio:
+                                log.info(
+                                    f"🛡️ [Volatility Guard] {symbol} {signal.direction} blocked: "
+                                    f"IV Crush Risk (IV {atm_iv*100:.1f}% / HV {hv*100:.1f}% = {atm_iv/hv:.2f}x > {max_ratio:.2f}x)"
+                                )
+                                continue
+
+                            if vol_cfg.get("use_delta_strike_selection", True) and oi_res.strikes_data:
+                                target_d = float(cfg.get("prefer_itm_delta", 0.70))
+                                d_strike = find_strike_for_delta(
+                                    signal.spot_price, signal.spot_price, oi_res.strikes_data,
+                                    3.0 / 365.0, target_delta=target_d, option_type=signal.option_type
+                                )
+                                if d_strike and d_strike != signal.target_strike:
+                                    log.info(f"🎯 [Delta Strike] {symbol} {signal.option_type}: Adjusted {signal.target_strike:.0f} -> {d_strike:.0f} (Target Δ≈{target_d:.2f})")
+                                    signal.target_strike = d_strike
+
                         oi_info_dict = {
                             "is_valid": True,
                             "pcr": oi_res.pcr,

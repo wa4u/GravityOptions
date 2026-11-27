@@ -254,3 +254,82 @@ def greeks_76_spot(
         "vega": round(vega, 3),
         "iv": round(sigma, 4),
     }
+
+
+def expected_move_1day(spot: float, atm_iv: float) -> float:
+    """1-day 1-sigma expected move: spot * atm_iv / sqrt(252)."""
+    if spot <= 0 or atm_iv <= 0:
+        return 0.0
+    return round(spot * atm_iv / math.sqrt(252.0), 1)
+
+
+def realized_vol_from_candles(candles: list, window: int = 20) -> Optional[float]:
+    """
+    Annualized Close-to-Close realised volatility from intraday/daily Candle objects.
+    Aggregates intraday bars to daily closes when multiple days exist, otherwise scales bar returns.
+    """
+    if not candles or len(candles) < 10:
+        return None
+
+    # Group by date to get daily closes if >= 5 trading days are present
+    daily_closes = {}
+    for c in candles:
+        ts = getattr(c, "timestamp", None)
+        d = ts.date() if hasattr(ts, "date") else None
+        if d is not None:
+            daily_closes[d] = float(c.close)
+
+    if len(daily_closes) >= 6:
+        closes = [daily_closes[d] for d in sorted(daily_closes.keys())][-(window + 1):]
+        ann_factor = 252.0
+    else:
+        closes = [float(c.close) for c in candles[-(window + 1):]]
+        ann_factor = 252.0 * 75.0  # 5m bars per NSE session
+
+    if len(closes) < 5:
+        return None
+
+    rets = [math.log(closes[i] / closes[i - 1]) for i in range(1, len(closes)) if closes[i - 1] > 0 and closes[i] > 0]
+    if len(rets) < 4:
+        return None
+
+    mean_r = sum(rets) / len(rets)
+    var = sum((r - mean_r) ** 2 for r in rets) / max(1, len(rets) - 1)
+    hv = math.sqrt(var * ann_factor)
+    return round(hv, 4) if hv > 0.005 else None
+
+
+def find_strike_for_delta(
+    spot: float,
+    forward: float,
+    strikes_data: list,
+    time_to_expiry_years: float,
+    target_delta: float = 0.65,
+    option_type: str = "CE"
+) -> Optional[float]:
+    """
+    Pick the liquid strike whose Black-76 spot |delta| is closest to target_delta.
+    Filters out strikes with zero LTP/volume when liquid alternatives exist.
+    """
+    if not strikes_data or spot <= 0 or forward <= 0:
+        return None
+
+    is_call = option_type.upper() == "CE"
+    T = max(time_to_expiry_years, 1e-4)
+    best_strike = None
+    best_diff = float("inf")
+
+    for row in strikes_data:
+        ltp = row.ce_ltp if is_call else row.pe_ltp
+        vol = row.ce_volume if is_call else row.pe_volume
+        iv = (row.ce_iv if is_call else row.pe_iv) or 0.15
+        if ltp <= 0.5 and vol <= 0:
+            continue
+        g = greeks_76_spot(spot, forward, row.strike, T, iv, option_type="CE" if is_call else "PE")
+        abs_d = abs(g.get("delta", 0.5))
+        diff = abs(abs_d - abs(target_delta))
+        if diff < best_diff:
+            best_diff = diff
+            best_strike = row.strike
+
+    return best_strike
